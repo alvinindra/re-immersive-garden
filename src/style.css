@@ -1,0 +1,159 @@
+@font-face {
+  font-family: "PSTimes";
+  src: url("/fonts/PSTimes-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "HelveticaNeueRegular";
+  src: url("/fonts/HelveticaNeue-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  --bg: #bdbdbd;
+  --ink: #1a1a1a;
+  --ui: 0.7291666667vw; /* ~14px @1920 */
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: HelveticaNeueRegular, sans-serif;
+}
+
+#webgl {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  display: block;
+  z-index: 0;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* shared label style for the UI chrome */
+.topbar__about,
+.hero__scroll,
+.footbar__projects {
+  font-family: HelveticaNeueRegular, sans-serif;
+  font-size: clamp(12px, var(--ui), 15px);
+  letter-spacing: 0.01em;
+  color: var(--ink);
+  text-decoration: none;
+}
+
+/* ---- top bar ---- */
+.topbar {
+  position: fixed;
+  z-index: 3;
+  top: 2.4vw;
+  right: 2.7777vw;
+  display: flex;
+  align-items: center;
+}
+
+/* ---- hero (vertically centered row) ---- */
+.hero {
+  position: relative;
+  z-index: 2;
+  height: 100vh;
+  display: flex;
+  align-items: center;
+  pointer-events: none;
+  user-select: none;
+}
+
+.hero__logo {
+  position: absolute;
+  left: 2.7777vw;
+  display: flex;
+  align-items: center;
+  gap: 0.7vw;
+  text-decoration: none;
+  color: var(--ink);
+  pointer-events: auto;
+}
+.hero__monogram {
+  font-family: PSTimes, serif;
+  font-size: 1.45vw;
+  line-height: 1;
+  border: 1px solid var(--ink);
+  border-radius: 2px;
+  padding: 0.18em 0.28em;
+}
+.hero__wordmark {
+  font-family: HelveticaNeueRegular, sans-serif;
+  font-size: 0.62vw;
+  line-height: 1.15;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.hero__tagline {
+  width: 100%;
+  text-align: center;
+  font-family: PSTimes, serif;
+  font-weight: 400;
+  font-size: 1.5277777778vw; /* ~29px @1920 */
+  line-height: 1.1;
+  color: var(--ink);
+}
+
+.hero__scroll {
+  position: absolute;
+  right: 2.7777vw;
+}
+
+/* ---- footer ---- */
+.footbar {
+  position: fixed;
+  z-index: 3;
+  left: 0;
+  right: 0;
+  bottom: 2.4vw;
+  padding: 0 2.7777vw;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  pointer-events: none;
+}
+.footbar__projects {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5em;
+  pointer-events: auto;
+}
+.footbar__projects span {
+  font-size: 0.85em;
+}
+.footbar__circle {
+  width: 1.7vw;
+  height: 1.7vw;
+  border: 1px solid var(--ink);
+  border-radius: 50%;
+}

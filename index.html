@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Immersive Garden — Reverse Engineered</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <canvas id="webgl"></canvas>
+
+    <!-- DOM source for the hero title (the real site hides this and renders it
+         in WebGL; we keep it as the accessible/visible hero copy). -->
+    <h1 class="visually-hidden" data-webgl-title>
+      Transcend anything seen or felt before by crafting unparalleled
+      experiences for ambitious brands.
+    </h1>
+
+    <header class="topbar">
+      <a class="topbar__about" href="#">About</a>
+    </header>
+
+    <main class="hero">
+      <a class="hero__logo" href="#" aria-label="Immersive Garden">
+        <span class="hero__monogram">IG</span>
+        <span class="hero__wordmark">Immersive<br />Garden</span>
+      </a>
+      <p class="hero__tagline">Innovative digital experiences studio</p>
+      <div class="hero__scroll">Scroll down</div>
+    </main>
+
+    <footer class="footbar">
+      <a class="footbar__projects" href="#">See all projects <span>&#8595;</span></a>
+      <div class="footbar__circle" aria-hidden="true"></div>
+    </footer>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
