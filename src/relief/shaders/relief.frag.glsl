@@ -169,6 +169,8 @@ void main() {
   float inversefresnelFactor = 1.0 - fresnelFactor;
   inversefresnelFactor = 1. - pow(inversefresnelFactor, CHROMATIC_FRESNEL_SHARPNESS);
   float waveMask = max(smoothstep(1., 0.1, mix(inversefresnelFactor, 1., 1. - CHROMATIC_FRESNEL_OPACITY)), smoothstep(CHROMATIC_SHADOW_RANGE.y, CHROMATIC_SHADOW_RANGE.x, level5) * CHROMATIC_SHADOW_OPACITY) * uOpacity;
+  // Live Navier-Stokes fluid dye (real site's Dl sim). fluid.b = dye presence
+  // along the cursor path → gates the chromatic iridescent trail.
   vec4 fluid = texture2D(tFluidFlowmap, uvScreen);
   fluid += mix(0., fastScrollNoise.g * 2., uFastScroll);
   color = applyFluidEffect(effectConfig, color, fluid, vUv, uTime, waveMask, normal);

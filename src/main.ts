@@ -1,14 +1,17 @@
-import { Relief } from "./relief/Relief";
+import { Relief } from "./relief/Relief"
+import { initCursor } from "./cursor"
 
-const canvas = document.querySelector<HTMLCanvasElement>("#webgl");
-if (!canvas) throw new Error("missing #webgl canvas");
+initCursor()
 
-const relief = new Relief(canvas);
+const canvas = document.querySelector<HTMLCanvasElement>("#webgl")
+if (!canvas) throw new Error("missing #webgl canvas")
+
+const relief = new Relief(canvas)
 relief
-  .load("/relief.glb")
+  .load("webgl/home/reliefs_high_compressed.glb")
   .then(() => {
-    relief.start();
+    relief.start()
   })
   .catch((err) => {
-    console.error("relief load failed", err);
-  });
+    console.error("relief load failed", err)
+  })

@@ -157,3 +157,18 @@ body {
   border: 1px solid var(--ink);
   border-radius: 50%;
 }
+
+/* ---- custom cursor (real site's CursorElt) ---- */
+/* small black dot that rides on the pointer; native arrow stays visible. */
+.cursor__follow {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 10;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #030303;
+  pointer-events: none;
+  will-change: transform;
+}
