@@ -38,7 +38,7 @@ const CONFIG = {
   fovHeight: 9.995, // Ei
   // The GLB is a 6-section tiled relief; we frame the bird section. This offset is
   // a fraction of visible height: 0 = bird centered (fills view), >0 nudges it up.
-  scrollOffset: 0.15,
+  scrollOffset: 0,
 }
 
 /** A pointer that tracks its eased normalized position and per-frame velocity,
@@ -112,6 +112,8 @@ export class Relief {
       CONFIG.camera.far,
     )
     this.camera.position.set(0, 0, CONFIG.camera.distance)
+    // applyFraming() parks the hero tile near world Y 0, so the camera must look
+    // straight at 0 — looking up (0,10,0) re-centered the view onto the deer row.
     this.camera.lookAt(0, 0, 0)
 
     this.flowmap = new Flowmap(this.renderer, {
@@ -235,23 +237,26 @@ export class Relief {
     const box = new Box3().setFromObject(this.model)
     const center = box.getCenter(new Vector3())
 
-    // The relief is tiled into ~6 sections; pick the bird tile closest to the
-    // model center so framing is GLB-driven rather than a hard-coded Y.
-    let birdY = center.y
+    // The relief is an 18-tile grid (3 cols × 6 rows). Three tiles use the bird
+    // material; only the center-column one (bird_01 at x≈0) is framable head-on,
+    // so pick the bird nearest the center column and keep its FULL position.
+    // (The old code kept the bird's Y but reused center.x, which centered the
+    //  center-column tile at that Y — dragonflies — instead of an actual bird.)
+    const birdPos = new Vector3(center.x, center.y, 0)
     let best = Infinity
     const tmp = new Box3()
     const c = new Vector3()
     this.model.traverse((o) => {
       if (!(o instanceof Mesh) || !/bird/i.test(o.name)) return
       tmp.setFromObject(o).getCenter(c)
-      const d = Math.abs(c.y - center.y)
-      if (d < best) {
-        best = d
-        birdY = c.y
+      const dx = Math.abs(c.x - center.x)
+      if (dx < best) {
+        best = dx
+        birdPos.copy(c)
       }
     })
 
-    this.framePivot.set(center.x, birdY, 0)
+    this.framePivot.set(birdPos.x, birdPos.y, 0)
     this.updateCameraFov()
     this.applyFraming()
   }
