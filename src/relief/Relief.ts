@@ -2,6 +2,7 @@ import {
   Box3,
   Color,
   DoubleSide,
+  FrontSide,
   GLSL3,
   Group,
   LinearSRGBColorSpace,
@@ -81,6 +82,7 @@ export class Relief {
   private scrollPct = 0
   private homeMaxY = 0
   private homeMinY = 0
+  private heroLift = 0 // lifts the relief content toward the top at the hero
 
   // dark footer relief (footer_compressed.glb), cross-faded in at the bottom
   private footerModel = new Group()
@@ -230,6 +232,7 @@ export class Relief {
               fragmentShader: reliefFrag,
               side: DoubleSide,
               transparent: true, // uOpacity drives alpha for the footer cross-fade
+              depthWrite: false, // background relief: let the footer draw over it
               uniforms: {
                 ...this.shared,
                 tBake1: { value: tBake1 },
@@ -272,10 +275,10 @@ export class Relief {
               glslVersion: GLSL3,
               vertexShader: reliefVert,
               fragmentShader: reliefFrag,
-              side: DoubleSide,
+              side: FrontSide, // front only — avoid flat backface slabs in the depth
               transparent: true,
-              depthTest: false, // always composite over the home relief
-              depthWrite: false,
+              depthTest: true,
+              depthWrite: true, // self-sort the layered flowers
               uniforms: {
                 ...this.shared,
                 uOpacity: this.footerOpacity, // independent fade
@@ -287,12 +290,15 @@ export class Relief {
           this.footerModel.add(data.scene)
           this.footerModel.renderOrder = 1
 
-          // frame the footer panel centred in view
+          // frame the footer relief to fill the view (slightly overscanned)
+          this.footerModel.scale.setScalar(1)
           this.footerModel.position.set(0, 0, 0)
           this.footerModel.updateWorldMatrix(true, true)
           const box = new Box3().setFromObject(this.footerModel)
           const center = box.getCenter(new Vector3())
-          this.footerModel.position.set(-center.x, -center.y, 0)
+          const s = 1.35
+          this.footerModel.scale.setScalar(s)
+          this.footerModel.position.set(-s * center.x, -s * center.y, 0)
           resolve()
         },
         undefined,
@@ -348,6 +354,7 @@ export class Relief {
     const vh = this.visibleHeight()
     this.panTop = -(this.homeMaxY - vh / 2)
     this.panBottom = -(this.homeMinY + vh / 2)
+    this.heroLift = vh * 1.15 // hero: push the relief band up toward the top
   }
 
   /** Real-site fov: a = $o * (Ei - 0.1) / aspect; fov = min(30, 2·atan(a / 2d)).
@@ -367,7 +374,10 @@ export class Relief {
   private applyFraming() {
     this.model.position.x = -this.modelCenterX
     const t = Math.max(0, Math.min(1, this.scrollPct))
-    this.model.position.y = this.panTop + (this.panBottom - this.panTop) * t
+    // lift only near the hero (tapers out as you scroll) so the relief sits near
+    // the top of the first screen instead of centred low
+    const lift = (1 - Math.min(1, t * 3)) * this.heroLift
+    this.model.position.y = this.panTop + (this.panBottom - this.panTop) * t + lift
   }
 
   private onResize = () => {

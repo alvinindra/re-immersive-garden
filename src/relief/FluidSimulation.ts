@@ -429,12 +429,15 @@ export class FluidSimulation {
       coalesced.forEach(this.onPointerMove)
       return
     }
-    this.pushSplat(e.pageX, e.pageY)
+    // viewport coords (NOT pageX/Y): the relief is a fixed full-screen surface, so
+    // pageY's scroll offset would inject the dye off-screen once you scroll — which
+    // is why the chromatic trail only showed at the hero.
+    this.pushSplat(e.clientX, e.clientY)
   }
 
   private onTouchMove = (e: TouchEvent) => {
     const t = e.changedTouches[0]
-    if (t) this.pushSplat(t.pageX, t.pageY)
+    if (t) this.pushSplat(t.clientX, t.clientY)
   }
 
   private pushSplat(px: number, py: number) {
