@@ -115,7 +115,9 @@ export class Relief {
   }
 
   constructor(canvas: HTMLCanvasElement) {
-    this.dpr = Math.min(window.devicePixelRatio, 2)
+    // cap DPR: the relief/fluid are full-screen, so Retina's 4× pixels tanked FPS.
+    // 1.5 keeps it crisp while roughly halving fragment work vs 2.0.
+    this.dpr = Math.min(window.devicePixelRatio, 1.5)
 
     this.renderer = new WebGLRenderer({ canvas, antialias: true, alpha: false })
     this.renderer.setPixelRatio(this.dpr)
@@ -354,7 +356,7 @@ export class Relief {
     const vh = this.visibleHeight()
     this.panTop = -(this.homeMaxY - vh / 2)
     this.panBottom = -(this.homeMinY + vh / 2)
-    this.heroLift = vh * 1.15 // hero: push the relief band up toward the top
+    this.heroLift = vh * 0.28 // hero: nudge the bird tile up toward the top
   }
 
   /** Real-site fov: a = $o * (Ei - 0.1) / aspect; fov = min(30, 2·atan(a / 2d)).
@@ -374,10 +376,10 @@ export class Relief {
   private applyFraming() {
     this.model.position.x = -this.modelCenterX
     const t = Math.max(0, Math.min(1, this.scrollPct))
-    // lift only near the hero (tapers out as you scroll) so the relief sits near
-    // the top of the first screen instead of centred low
-    const lift = (1 - Math.min(1, t * 3)) * this.heroLift
-    this.model.position.y = this.panTop + (this.panBottom - this.panTop) * t + lift
+    // hero (t=0) frames the bird tile, nudged up toward the top; scrolling pans
+    // down through the panel to the bottom (where the footer relief takes over).
+    const heroY = -this.framePivot.y + this.heroLift
+    this.model.position.y = heroY + (this.panBottom - heroY) * t
   }
 
   private onResize = () => {

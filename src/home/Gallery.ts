@@ -28,6 +28,9 @@ import type { ScrollState } from "../scroll/SmoothScroll"
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v))
 
+/** max videos decoding at once — keeps Retina FPS smooth */
+const MAX_VIDEOS = 3
+
 type Kind = "image" | "video" | "glb"
 
 interface GlbScene {
@@ -246,7 +249,7 @@ export class Gallery {
         root.add(model)
       }
 
-      const rt = new WebGLRenderTarget(Math.round(aspect * 1024), 1024, {
+      const rt = new WebGLRenderTarget(Math.round(aspect * 512), 512, {
         depthBuffer: true,
         samples: 4, // MSAA for clean model edges
       })
@@ -272,6 +275,7 @@ export class Gallery {
     this.rawVel *= 0.9
 
     const loadMargin = h * 1.4
+    const videoCandidates: Array<{ p: MediaPlane; dist: number }> = []
     for (const p of this.planes) {
       const r = p.el.getBoundingClientRect()
       const onScreen = r.bottom > -loadMargin && r.top < h + loadMargin
@@ -302,18 +306,29 @@ export class Gallery {
       if (inView && p.loaded) p.opacityTarget = 1
       u.uOpacity.value = lerp(u.uOpacity.value, p.opacityTarget, 0.08)
 
-      // play videos only while in view (real site delays ~200ms; pause on exit)
+      // queue in-view videos; only the nearest few actually decode (see below)
       if (p.kind === "video" && p.video && p.loaded) {
-        if (!p.playing) {
-          p.video.play().then(() => { p.playing = true }).catch(() => {})
-        }
-        if (p.videoTex) p.videoTex.needsUpdate = true
+        videoCandidates.push({ p, dist: Math.abs(r.top + r.height / 2 - h / 2) })
       }
 
       // render glb models to their target, tilting with scroll position
       if (p.kind === "glb" && p.glb) {
         const e = clamp((h / 2 - (r.top + r.height / 2)) / (h / 2), -1, 1)
         this.renderGlb(p.glb, e, dt)
+      }
+    }
+
+    // cap concurrent video decode (Retina + many mp4s was the lag): play the
+    // MAX_VIDEOS nearest the viewport centre, pause the rest.
+    videoCandidates.sort((a, b) => a.dist - b.dist)
+    for (let i = 0; i < videoCandidates.length; i++) {
+      const p = videoCandidates[i].p
+      if (i < MAX_VIDEOS) {
+        if (!p.playing) p.video!.play().then(() => (p.playing = true)).catch(() => {})
+        if (p.videoTex) p.videoTex.needsUpdate = true
+      } else if (p.playing) {
+        p.video!.pause()
+        p.playing = false
       }
     }
   }
