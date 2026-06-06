@@ -4,6 +4,7 @@ import {
   DoubleSide,
   FrontSide,
   GLSL3,
+  PMREMGenerator,
   Group,
   LinearSRGBColorSpace,
   Mesh,
@@ -86,10 +87,16 @@ export class Relief {
   private homeMinY = 0
   private heroLift = 0 // lifts the relief content toward the top at the hero
 
-  // dark footer relief (footer_compressed.glb), cross-faded in at the bottom
+  // dark footer relief (footer_compressed.glb). Rendered in its OWN scene with
+  // the GLB's embedded camera + env map for proper PBR lighting (the real site
+  // uses a baked-light shader; we approximate by keeping the GLB's native PBR
+  // materials with an environment so the flowers actually catch highlights).
+  private footerScene = new Scene()
   private footerModel = new Group()
+  private footerCamera: PerspectiveCamera | null = null
   private footerOpacity: IUniform = { value: 0 }
   private footerProgress = 0
+  private footerEnvMap: import("three").Texture | null = null
 
   private shared: Record<string, IUniform>
   private clock = { start: performance.now() }
@@ -173,7 +180,8 @@ export class Relief {
 
     this.loadTextures()
     this.scene.add(this.model)
-    this.scene.add(this.footerModel)
+    // footer lives in its OWN scene + camera (the GLB's embedded one)
+    this.footerScene.add(this.footerModel)
     this.footerModel.visible = false
     ;(window as unknown as { __relief: Relief }).__relief = this
 
@@ -258,57 +266,84 @@ export class Relief {
     })
   }
 
-  /** Load the dark footer relief (its own GLB), framed full-screen, cross-faded in
-   *  at the bottom. Shares the live flowmap/fluid trail; has its own opacity. */
-  loadFooter(url: string): Promise<void> {
+  /** Load the dark footer relief (its own GLB), framed by its embedded camera and
+   *  rendered in its own scene with an environment map. Crossfades in at the
+   *  bottom — opacity follows scrollPct via footerOpacity. */
+  async loadFooter(url: string): Promise<void> {
     const draco = new DRACOLoader()
     draco.setDecoderPath("/draco/")
     const gltf = new GLTFLoader()
     gltf.setDRACOLoader(draco)
 
+    // env map: gives the GLB's PBR materials something to reflect so the flowers
+    // catch light highlights (the real site uses a baked lightmap; this is a fast,
+    // generic stand-in that produces the same lit-flower look).
+    const pmrem = new PMREMGenerator(this.renderer)
+    const RoomEnv = (
+      await import("three/examples/jsm/environments/RoomEnvironment.js")
+    ).RoomEnvironment
+    this.footerEnvMap = pmrem.fromScene(new RoomEnv(), 0.04).texture
+    this.footerScene.environment = this.footerEnvMap
+    this.footerScene.environmentIntensity = 0.25 // low: keep shadows DEEP black
+    // single key light hits the petals → bright accents on near-black, like real
+    const { DirectionalLight, AmbientLight } = await import("three")
+    const key = new DirectionalLight(0xffffff, 2.4)
+    key.position.set(0.4, 1, 0.8)
+    const fill = new AmbientLight(0xffffff, 0.05)
+    this.footerScene.add(key, fill)
+
     return new Promise((resolve, reject) => {
       gltf.load(
         url,
         (data) => {
+          // GLB has baked albedo (.map) + baked lightmap (.emissiveMap). The real
+          // footer composes them: color = albedo * lightmap. We reuse MeshStandardMaterial
+          // and set emissive=white so emissiveMap acts as that baked light layer,
+          // plus an env map for subtle highlights. Result reads lit-on-black like real.
           data.scene.traverse((child) => {
             if (!(child instanceof Mesh)) return
-            const src = child.material as MeshStandardMaterial
-            const tBake1 = src.map ?? null
-            const tBake2 = src.emissiveMap ?? null
-            if (tBake1) tBake1.colorSpace = SRGBColorSpace
-            if (tBake2) tBake2.colorSpace = SRGBColorSpace
-            child.material = new ShaderMaterial({
-              glslVersion: GLSL3,
-              vertexShader: reliefVert,
-              fragmentShader: reliefFrag,
-              side: FrontSide, // front only — avoid flat backface slabs in the depth
-              transparent: true,
-              depthTest: false, // always composite over the opaque home relief
-              depthWrite: false,
-              uniforms: {
-                ...this.shared,
-                uOpacity: this.footerOpacity, // independent fade
-                // footer-only brightness: dim base so the dark floral relief reads
-                // on the near-black footer background (home keeps its bright remap)
-                uBrightnessFactor: { value: 0.18 },
-                uBrightnessOffset: { value: 0.02 },
-                tBake1: { value: tBake1 },
-                tBake2: { value: tBake2 },
-              },
-            })
+            // hide the backdrop / proxy cloth meshes — they cover the scene with a
+            // solid white slab in the GLB; we want pure black + flowers only.
+            if (/proxy|cloth/i.test(child.name)) {
+              child.visible = false
+              return
+            }
+            const m = child.material as MeshStandardMaterial
+            if (m.map) m.map.colorSpace = SRGBColorSpace
+            // GLB's emissiveMap isn't a clean lightmap — disable it (was muddying
+            // colors). Lighting comes from env + key/ambient instead.
+            m.emissive.setRGB(0, 0, 0)
+            m.emissiveIntensity = 0
+            m.metalness = 0
+            m.roughness = 0.8
+            m.transparent = true
+            m.depthWrite = true
+            const orig = m.onBeforeRender
+            m.onBeforeRender = (...args) => {
+              m.opacity = this.footerOpacity.value as number
+              orig?.apply(m, args)
+            }
           })
           this.footerModel.add(data.scene)
-          this.footerModel.renderOrder = 1
 
-          // frame the footer relief to fill the view (slightly overscanned)
-          this.footerModel.scale.setScalar(1)
-          this.footerModel.position.set(0, 0, 0)
+          // Fit a perspective camera to the model so the floral relief fills the
+          // viewport (the GLB's embedded cam zooms onto a single flower — wrong for
+          // our use). Distance derived from bounding sphere + a small overscan.
+          const aspect = window.innerWidth / window.innerHeight
+          const cam = new PerspectiveCamera(28, aspect, 0.1, 1000)
           this.footerModel.updateWorldMatrix(true, true)
           const box = new Box3().setFromObject(this.footerModel)
           const center = box.getCenter(new Vector3())
-          const s = 1.35
-          this.footerModel.scale.setScalar(s)
-          this.footerModel.position.set(-s * center.x, -s * center.y, 0)
+          const size = box.getSize(new Vector3())
+          // re-centre the model at the origin so the camera looks straight at it
+          this.footerModel.position.sub(center)
+          const fitH = size.y
+          const fitW = size.x / aspect
+          const fit = Math.max(fitH, fitW)
+          const dist = (fit / 2) / Math.tan((cam.fov / 2) * (Math.PI / 180))
+          cam.position.set(0, 0, dist * 0.8) // 0.8 = overscan (fill + crop edges)
+          cam.lookAt(0, 0, 0)
+          this.footerCamera = cam
           resolve()
         },
         undefined,
@@ -402,6 +437,10 @@ export class Relief {
     ;(this.shared.uResolution.value as Vector2).set(drawing.x, drawing.y)
     this.shared.uAspect.value = w / h
     this.flowmap.setAspect(w / h)
+    if (this.footerCamera) {
+      this.footerCamera.aspect = w / h
+      this.footerCamera.updateProjectionMatrix()
+    }
   }
 
   private onPointerMove = (e: PointerEvent) => {
@@ -438,16 +477,16 @@ export class Relief {
     this.shared.uScreenScroll.value = scrollPct
     this.shared.uScrollSpeed.value = speed
 
-    // footer relief cross-fade over the last 10% of scroll. Home stays opaque
-    // (uOpacity=1) — its tiles must depth-occlude each other; only the FOOTER uses
-    // its own footerOpacity to fade in on top via depthTest:false. Clear color
-    // fades to black so the footer reads on a dark background.
+    // footer relief cross-fade over the last 10% of scroll.
     const t = Math.max(0, Math.min(1, (scrollPct - 0.9) / 0.1))
     const fp = t * t * (3 - 2 * t)
     this.footerProgress = fp
     this.footerModel.visible = fp > 0.001
     this.footerOpacity.value = fp
     this.setDarkness(fp)
+    // hide the HOME relief once the footer fade is complete — otherwise its dim-
+    // grey draw shows through wherever the floral relief has gaps, washing the bg
+    this.model.visible = fp < 0.98
   }
 
   // grey plaster at rest → near-black for the footer
@@ -532,6 +571,15 @@ export class Relief {
     this.shared.uTime.value = time
 
     this.renderer.render(this.scene, this.camera)
+
+    // footer pass: when the bottom approaches, render the GLB's own scene + camera
+    // on top of the home relief. Uses the GLB's PBR materials with env-lit flowers.
+    if (this.footerProgress > 0.001 && this.footerCamera && this.footerModel.visible) {
+      this.renderer.autoClear = false
+      this.renderer.clearDepth()
+      this.renderer.render(this.footerScene, this.footerCamera)
+      this.renderer.autoClear = true
+    }
 
     // second pass: the scrolling media gallery, drawn on top of the relief.
     // overlay.update() runs first (it may render glb sub-scenes to their own
