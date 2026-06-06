@@ -26,7 +26,7 @@ import {
 
 const SIM = 128 // velocity/pressure grid
 const DYE = 512 // dye (density) field — what the relief reads
-const PRESSURE_ITERATIONS = 2
+const PRESSURE_ITERATIONS = 3
 const DT = 0.016
 
 // real-site config: et.fluidFlowmap

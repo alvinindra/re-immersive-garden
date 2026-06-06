@@ -115,9 +115,9 @@ export class Relief {
   }
 
   constructor(canvas: HTMLCanvasElement) {
-    // cap DPR: the relief/fluid are full-screen, so Retina's 4× pixels tanked FPS.
-    // 1.5 keeps it crisp while roughly halving fragment work vs 2.0.
-    this.dpr = Math.min(window.devicePixelRatio, 1.5)
+    // full Retina crispness for the relief (cap at 2 like the original site).
+    // Smoothness comes from cached layout + capped video decode, not lower DPR.
+    this.dpr = Math.min(window.devicePixelRatio, 2)
 
     this.renderer = new WebGLRenderer({ canvas, antialias: true, alpha: false })
     this.renderer.setPixelRatio(this.dpr)
@@ -233,8 +233,12 @@ export class Relief {
               vertexShader: reliefVert,
               fragmentShader: reliefFrag,
               side: DoubleSide,
-              transparent: true, // uOpacity drives alpha for the footer cross-fade
-              depthWrite: false, // background relief: let the footer draw over it
+              // transparent so uOpacity can fade the home relief out at the footer
+              // (at full alpha this is pixel-identical to opaque — the earlier
+              // quality loss was from the lowered DPR, not this). depthWrite off so
+              // the footer relief composites over it.
+              transparent: true,
+              depthWrite: false,
               uniforms: {
                 ...this.shared,
                 tBake1: { value: tBake1 },

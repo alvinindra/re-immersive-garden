@@ -45,28 +45,14 @@ relief
     setTimeout(() => gallery.measureLayout(), 350)
     document.fonts?.ready.then(() => gallery.measureLayout())
 
-    // single RAF loop drives Lenis → relief (+ gallery overlay) → scroll cursor.
-    // Adaptive quality: if FPS sags, step the device pixel ratio down (smooth > crisp).
+    // single RAF loop drives Lenis → relief (+ gallery overlay) → scroll cursor
     let prev = performance.now()
-    let frames = 0
-    let acc = 0
     const loop = (t: number) => {
       const dt = Math.min(0.05, (t - prev) / 1000)
       prev = t
       scroll.raf(t)
       relief.update()
       scrollCursor.update(dt)
-
-      frames++
-      acc += dt
-      if (frames >= 45) {
-        const fps = frames / acc
-        if (fps < 50 && relief.pixelRatio > 1) {
-          relief.setPixelRatio(Math.max(1, relief.pixelRatio - 0.25))
-        }
-        frames = 0
-        acc = 0
-      }
       requestAnimationFrame(loop)
     }
     requestAnimationFrame(loop)
