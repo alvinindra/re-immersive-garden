@@ -56,6 +56,11 @@ interface MediaPlane {
   videoTex?: VideoTexture
   playing?: boolean
   glb?: GlbScene
+  // cached layout (document-space) — avoids getBoundingClientRect every frame
+  docTop: number
+  left: number
+  width: number
+  height: number
 }
 
 /**
@@ -149,6 +154,10 @@ export class Gallery {
         requested: false,
         hoverTarget: 0,
         opacityTarget: 0,
+        docTop: 0,
+        left: 0,
+        width: 0,
+        height: 0,
       }
       this.planes.push(plane)
 
@@ -163,6 +172,21 @@ export class Gallery {
       el.addEventListener("click", () => {
         if (plane.uri) window.open("https://immersive-g.com/" + plane.uri, "_blank")
       })
+    }
+    this.measureLayout()
+  }
+
+  /** Cache each placeholder's document-space rect. Cheap reflow, done once on
+   *  build + resize instead of every frame (getBoundingClientRect-per-frame was a
+   *  major scroll-lag source). Per-frame we only read window.scrollY. */
+  measureLayout() {
+    const scrollY = window.scrollY
+    for (const p of this.planes) {
+      const r = p.el.getBoundingClientRect()
+      p.docTop = r.top + scrollY
+      p.left = r.left
+      p.width = r.width
+      p.height = r.height
     }
   }
 
@@ -275,9 +299,12 @@ export class Gallery {
     this.rawVel *= 0.9
 
     const loadMargin = h * 1.4
+    const scrollY = window.scrollY
     const videoCandidates: Array<{ p: MediaPlane; dist: number }> = []
     for (const p of this.planes) {
-      const r = p.el.getBoundingClientRect()
+      if (p.width === 0) continue
+      const top = p.docTop - scrollY
+      const r = { top, bottom: top + p.height, left: p.left, width: p.width, height: p.height }
       const onScreen = r.bottom > -loadMargin && r.top < h + loadMargin
       if (!onScreen) {
         p.mesh.visible = false
@@ -368,5 +395,6 @@ export class Gallery {
     this.camera.top = h / 2
     this.camera.bottom = -h / 2
     this.camera.updateProjectionMatrix()
+    this.measureLayout()
   }
 }

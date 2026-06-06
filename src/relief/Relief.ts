@@ -356,7 +356,7 @@ export class Relief {
     const vh = this.visibleHeight()
     this.panTop = -(this.homeMaxY - vh / 2)
     this.panBottom = -(this.homeMinY + vh / 2)
-    this.heroLift = vh * 0.28 // hero: nudge the bird tile up toward the top
+    this.heroLift = 0 // hero frames the bird tile dead-centre (the original framing)
   }
 
   /** Real-site fov: a = $o * (Ei - 0.1) / aspect; fov = min(30, 2·atan(a / 2d)).
@@ -406,6 +406,20 @@ export class Relief {
   /** Register the scrolling media gallery, drawn over the relief each frame. */
   setOverlay(o: { update(dt: number): void; render(): void }) {
     this.overlay = o
+  }
+
+  /** Adaptive quality: lower the device pixel ratio when FPS dips. */
+  setPixelRatio(r: number) {
+    if (r === this.dpr) return
+    this.dpr = r
+    this.renderer.setPixelRatio(r)
+    this.renderer.setSize(window.innerWidth, window.innerHeight)
+    const drawing = this.renderer.getDrawingBufferSize(new Vector2())
+    ;(this.shared.uResolution.value as Vector2).set(drawing.x, drawing.y)
+  }
+
+  get pixelRatio() {
+    return this.dpr
   }
 
   /** Feed the smooth-scroll signal: pan the relief, drive scroll uniforms, and
