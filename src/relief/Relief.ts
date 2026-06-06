@@ -34,7 +34,7 @@ const CONFIG = {
   camera: { fov: 30, distance: 15, near: 5, far: 20, zoom: 1 },
   // lighter + lower-contrast remap so the reveal stays soft plaster-white like the
   // real site (our flowmap reaches deeper bake levels; this keeps darks from going harsh)
-  brightness: { factor: 0.3, offset: 0.62 }, // desktop
+  brightness: { factor: 0.6, offset: 0.4 }, // desktop (same as main branch)
   // Real-site fov constants ($o / Ei). fov stays decoupled from model size so the
   // relief shows a fixed-scale slice (~one section) instead of fitting all 6 tiles.
   fovWidthRatio: 1.33, // $o
@@ -454,8 +454,8 @@ export class Relief {
   setDarkness(d: number) {
     this.clearTmp.copy(this.clearGrey).lerp(this.clearBlack, d)
     this.renderer.setClearColor(this.clearTmp, 1)
-    this.shared.uBrightnessFactor.value = 0.3 + (0.18 - 0.3) * d
-    this.shared.uBrightnessOffset.value = 0.62 + (0.02 - 0.62) * d
+    this.shared.uBrightnessFactor.value = 0.6 + (0.18 - 0.6) * d
+    this.shared.uBrightnessOffset.value = 0.4 + (0.02 - 0.4) * d
   }
 
   // ---- idle automated sweep (mouse2 / velocity2) -------------------------

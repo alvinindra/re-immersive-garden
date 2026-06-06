@@ -135,10 +135,7 @@ void main() {
   vec3 color = vec3(0);
   float alpha = 1.0;
   vec2 uvScreen = gl_FragCoord.xy / uResolution;
-  // our flowmap responds more strongly than the real site's, pushing extrude into
-  // the dark bake levels (harsh shadows). Scale it down so the reveal stays in the
-  // light levels — soft, plaster-bright sculpting like the original.
-  vec4 flow = texture2D(tFlow, uvScreen) * 1.3;
+  vec4 flow = texture2D(tFlow, uvScreen) * 2.;
   float extrude = mix(flow.b, flow.a, 0.5);
   vec2 fastScrollNoise = getFastScrollNoise(uTime, uvScreen + vec2(0., -uScreenScroll), tMaskNoise, vec4(SCROLL_EXTRUDE_SPEED, SCROLL_EXTRUDE_NOISE_SIZE, SCROLL_EXTRUDE_MASK));
   float fastScrollExtrude = fastScrollNoise.r * SCROLL_EXTRUDE_STRENGTH;

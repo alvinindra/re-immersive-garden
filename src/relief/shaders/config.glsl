@@ -1,6 +1,6 @@
 // Home-relief shader constants, lifted verbatim from the real site config:
 // relief.fluidEffect / relief.chromaticMask / relief.scrollExtrude
-#define EFFECT_AMPLITUDE 0.15
+#define EFFECT_AMPLITUDE 0.57
 #define EFFECT_SHADOW_STRENGTH 0.3
 #define EFFECT_FLUID_MAGNITUDE 0.15
 #define EFFECT_FLUID_RED_COEF 2.0
@@ -23,4 +23,4 @@
 #define CHROMATIC_FRESNEL_SHARPNESS 35.0
 #define CHROMATIC_FRESNEL_OPACITY 0.98
 #define CHROMATIC_SHADOW_RANGE vec2(0.2, 0.42)
-#define CHROMATIC_SHADOW_OPACITY 0.12
+#define CHROMATIC_SHADOW_OPACITY 0.25
