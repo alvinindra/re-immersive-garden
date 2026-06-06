@@ -74,9 +74,26 @@ export class Relief {
   // x = model center, y = chosen bird-tile center (model-local, before offset)
   private framePivot = new Vector3()
 
+  // vertical scroll panning of the home relief (top → bottom of the panel)
+  private panTop = 0
+  private panBottom = 0
+  private modelCenterX = 0
+  private scrollPct = 0
+  private homeMaxY = 0
+  private homeMinY = 0
+
+  // dark footer relief (footer_compressed.glb), cross-faded in at the bottom
+  private footerModel = new Group()
+  private footerOpacity: IUniform = { value: 0 }
+  private footerProgress = 0
+
   private shared: Record<string, IUniform>
   private clock = { start: performance.now() }
   private dpr: number
+
+  // optional overlay (the scrolling media gallery), rendered as a second pass
+  private overlay?: { update(dt: number): void; render(): void }
+  private lastDt = 0
 
   // automated idle sweep (mouse2)
   private sweep: {
@@ -150,6 +167,8 @@ export class Relief {
 
     this.loadTextures()
     this.scene.add(this.model)
+    this.scene.add(this.footerModel)
+    this.footerModel.visible = false
     ;(window as unknown as { __relief: Relief }).__relief = this
 
     window.addEventListener("resize", this.onResize)
@@ -210,6 +229,7 @@ export class Relief {
               vertexShader: reliefVert,
               fragmentShader: reliefFrag,
               side: DoubleSide,
+              transparent: true, // uOpacity drives alpha for the footer cross-fade
               uniforms: {
                 ...this.shared,
                 tBake1: { value: tBake1 },
@@ -221,6 +241,58 @@ export class Relief {
 
           this.model.add(data.scene)
           this.frameModel()
+          resolve()
+        },
+        undefined,
+        reject,
+      )
+    })
+  }
+
+  /** Load the dark footer relief (its own GLB), framed full-screen, cross-faded in
+   *  at the bottom. Shares the live flowmap/fluid trail; has its own opacity. */
+  loadFooter(url: string): Promise<void> {
+    const draco = new DRACOLoader()
+    draco.setDecoderPath("/draco/")
+    const gltf = new GLTFLoader()
+    gltf.setDRACOLoader(draco)
+
+    return new Promise((resolve, reject) => {
+      gltf.load(
+        url,
+        (data) => {
+          data.scene.traverse((child) => {
+            if (!(child instanceof Mesh)) return
+            const src = child.material as MeshStandardMaterial
+            const tBake1 = src.map ?? null
+            const tBake2 = src.emissiveMap ?? null
+            if (tBake1) tBake1.colorSpace = SRGBColorSpace
+            if (tBake2) tBake2.colorSpace = SRGBColorSpace
+            child.material = new ShaderMaterial({
+              glslVersion: GLSL3,
+              vertexShader: reliefVert,
+              fragmentShader: reliefFrag,
+              side: DoubleSide,
+              transparent: true,
+              depthTest: false, // always composite over the home relief
+              depthWrite: false,
+              uniforms: {
+                ...this.shared,
+                uOpacity: this.footerOpacity, // independent fade
+                tBake1: { value: tBake1 },
+                tBake2: { value: tBake2 },
+              },
+            })
+          })
+          this.footerModel.add(data.scene)
+          this.footerModel.renderOrder = 1
+
+          // frame the footer panel centred in view
+          this.footerModel.position.set(0, 0, 0)
+          this.footerModel.updateWorldMatrix(true, true)
+          const box = new Box3().setFromObject(this.footerModel)
+          const center = box.getCenter(new Vector3())
+          this.footerModel.position.set(-center.x, -center.y, 0)
           resolve()
         },
         undefined,
@@ -257,8 +329,25 @@ export class Relief {
     })
 
     this.framePivot.set(birdPos.x, birdPos.y, 0)
+    this.modelCenterX = center.x
+    this.homeMaxY = box.max.y
+    this.homeMinY = box.min.y
+    // pan extent: top row visible at scrollPct 0 → bottom row at scrollPct 1, so the
+    // creatures change as you scroll (the real site pans the relief panel vertically).
     this.updateCameraFov()
+    this.computePan()
     this.applyFraming()
+  }
+
+  private visibleHeight() {
+    const fovRad = (this.camera.fov * Math.PI) / 180
+    return (2 * Math.tan(fovRad / 2) * CONFIG.camera.distance) / this.camera.zoom
+  }
+
+  private computePan() {
+    const vh = this.visibleHeight()
+    this.panTop = -(this.homeMaxY - vh / 2)
+    this.panBottom = -(this.homeMinY + vh / 2)
   }
 
   /** Real-site fov: a = $o * (Ei - 0.1) / aspect; fov = min(30, 2·atan(a / 2d)).
@@ -273,15 +362,12 @@ export class Relief {
     this.camera.updateProjectionMatrix()
   }
 
-  /** Place the chosen bird tile at the camera center (world Y 0), nudged up by
-   *  scrollOffset × visible height. Recomputed on resize since fov drives it. */
+  /** Pan the relief panel vertically by scrollPct (top row → bottom row), keeping
+   *  the centre column framed. Recomputed on resize since fov drives the extent. */
   private applyFraming() {
-    const fovRad = (this.camera.fov * Math.PI) / 180
-    const visibleHeight =
-      (2 * Math.tan(fovRad / 2) * CONFIG.camera.distance) / this.camera.zoom
-    this.model.position.x = -this.framePivot.x
-    this.model.position.y =
-      visibleHeight * CONFIG.scrollOffset - this.framePivot.y
+    this.model.position.x = -this.modelCenterX
+    const t = Math.max(0, Math.min(1, this.scrollPct))
+    this.model.position.y = this.panTop + (this.panBottom - this.panTop) * t
   }
 
   private onResize = () => {
@@ -290,7 +376,8 @@ export class Relief {
     this.renderer.setSize(w, h)
     this.camera.aspect = w / h
     this.updateCameraFov() // aspect-aware fov recalc
-    this.applyFraming() // keep bird framed after resize
+    this.computePan() // pan extent depends on fov
+    this.applyFraming() // re-pan after resize
     const drawing = this.renderer.getDrawingBufferSize(new Vector2())
     ;(this.shared.uResolution.value as Vector2).set(drawing.x, drawing.y)
     this.shared.uAspect.value = w / h
@@ -302,6 +389,41 @@ export class Relief {
       e.clientX / window.innerWidth,
       1 - e.clientY / window.innerHeight,
     )
+  }
+
+  /** Register the scrolling media gallery, drawn over the relief each frame. */
+  setOverlay(o: { update(dt: number): void; render(): void }) {
+    this.overlay = o
+  }
+
+  /** Feed the smooth-scroll signal: pan the relief, drive scroll uniforms, and
+   *  cross-fade the dark footer relief in as the bottom approaches. */
+  setScroll(scrollPct: number, speed: number) {
+    this.scrollPct = scrollPct
+    this.applyFraming() // pan the panel vertically
+    this.shared.uScreenScroll.value = scrollPct
+    this.shared.uScrollSpeed.value = speed
+
+    // footer relief cross-fade over the last 10% of scroll
+    const t = Math.max(0, Math.min(1, (scrollPct - 0.9) / 0.1))
+    const fp = t * t * (3 - 2 * t)
+    this.footerProgress = fp
+    this.footerModel.visible = fp > 0.001
+    this.footerOpacity.value = fp
+    this.shared.uOpacity.value = 1 - fp
+    this.setDarkness(fp)
+  }
+
+  // grey plaster at rest → near-black for the footer
+  private clearGrey = new Color(0.745, 0.745, 0.745)
+  private clearBlack = new Color(0.01, 0.01, 0.013)
+  private clearTmp = new Color()
+  /** 0 = grey home relief, 1 = dark footer relief. Drives the bottom fade-to-black. */
+  setDarkness(d: number) {
+    this.clearTmp.copy(this.clearGrey).lerp(this.clearBlack, d)
+    this.renderer.setClearColor(this.clearTmp, 1)
+    this.shared.uBrightnessFactor.value = 0.6 + (0.18 - 0.6) * d
+    this.shared.uBrightnessOffset.value = 0.4 + (0.02 - 0.4) * d
   }
 
   // ---- idle automated sweep (mouse2 / velocity2) -------------------------
@@ -350,6 +472,7 @@ export class Relief {
     const now = performance.now()
     const dt = Math.min(0.05, (now - this.prev) / 1000)
     this.prev = now
+    this.lastDt = dt
     const time = (now - this.clock.start) / 1000
 
     this.pointer.update()
@@ -370,6 +493,17 @@ export class Relief {
     this.shared.uTime.value = time
 
     this.renderer.render(this.scene, this.camera)
+
+    // second pass: the scrolling media gallery, drawn on top of the relief.
+    // overlay.update() runs first (it may render glb sub-scenes to their own
+    // render targets and restore renderer state) before we draw planes to screen.
+    if (this.overlay) {
+      this.overlay.update(this.lastDt)
+      this.renderer.autoClear = false
+      this.renderer.clearDepth()
+      this.overlay.render()
+      this.renderer.autoClear = true
+    }
   }
 
   start() {

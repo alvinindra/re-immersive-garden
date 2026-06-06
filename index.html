@@ -7,35 +7,39 @@
     <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>
+    <!-- fixed full-screen WebGL: relief background + scrolling media gallery (2nd pass) -->
     <canvas id="webgl"></canvas>
 
-    <!-- DOM source for the hero title (the real site hides this and renders it
-         in WebGL; we keep it as the accessible/visible hero copy). -->
-    <h1 class="visually-hidden" data-webgl-title>
-      Transcend anything seen or felt before by crafting unparalleled
-      experiences for ambitious brands.
-    </h1>
-
     <header class="topbar">
-      <a class="topbar__about" href="#">About</a>
+      <a class="topbar__about" href="https://immersive-g.com/the-studio" target="_blank" rel="noopener">About</a>
+      <span class="topbar__monogram" aria-hidden="true">IG</span>
     </header>
 
-    <main class="hero">
-      <a class="hero__logo" href="#" aria-label="Immersive Garden">
-        <span class="hero__monogram">IG</span>
-        <span class="hero__wordmark">Immersive<br />Garden</span>
-      </a>
-      <p class="hero__tagline">Innovative digital experiences studio</p>
-      <div class="hero__scroll">Scroll down</div>
-    </main>
+    <!-- everything inside scrolls under Lenis -->
+    <div id="scroll-content">
+      <section class="hero">
+        <a class="hero__logo" href="/" aria-label="Immersive Garden">
+          <span class="hero__monogram">IG</span>
+          <span class="hero__wordmark">Immersive<br />Garden</span>
+        </a>
+        <p class="hero__tagline">Innovative digital experiences studio</p>
+        <div class="hero__scroll">Scroll down</div>
+      </section>
 
-    <footer class="footbar">
-      <a class="footbar__projects" href="#">See all projects <span>&#8595;</span></a>
-      <div class="footbar__circle" aria-hidden="true"></div>
-    </footer>
+      <!-- project + media blocks injected here -->
+      <main id="blocks"></main>
 
-    <!-- custom cursor: little black dot following the pointer -->
-    <span class="cursor__follow" aria-hidden="true"></span>
+      <!-- black footer injected after #blocks -->
+    </div>
+
+    <!-- bottom-left "See all projects" button -->
+    <a class="allProjects" href="https://immersive-g.com/projects/" target="_blank" rel="noopener">
+      <span class="allProjects__text">See all projects</span>
+      <span class="allProjects__arrow" aria-hidden="true">&#8595;</span>
+    </a>
+
+    <!-- cursor hover label (the dot cluster is the HomeScrollCursor) -->
+    <span class="cursor__label" aria-hidden="true"></span>
 
     <script type="module" src="/src/main.ts"></script>
   </body>

@@ -1,17 +1,13 @@
-// Custom cursor: a small black dot (.cursor__follow) that rides just to the
-// RIGHT of the native arrow (native cursor stays visible).
-// The native arrow hotspot is at clientX/Y; offset the dot beside its body.
-// The dot eases toward the pointer (lerp) for a smooth trailing follow.
+// Custom cursor: the real site shows the HomeScrollCursor dots as the pointer, plus a
+// text label ("View project") when hovering a project. We render only the label here
+// (the dots live in ScrollCursor.ts) so there is a single dot cluster, like the real site.
 
-const OFFSET_X = 16 // px to the right of the pointer
-const OFFSET_Y = 0 // px top, to sit beside the arrow body
-const EASE = 0.15 // 0..1 — lower = smoother / more lag
+let labelEl: HTMLElement | null = null
 
 export function initCursor() {
-  const dot = document.querySelector<HTMLElement>(".cursor__follow")
-  if (!dot) return
+  labelEl = document.querySelector<HTMLElement>(".cursor__label")
+  if (!labelEl) return
 
-  // target (pointer) vs current (eased) positions
   let tx = window.innerWidth / 2
   let ty = window.innerHeight / 2
   let cx = tx
@@ -20,17 +16,28 @@ export function initCursor() {
   window.addEventListener(
     "pointermove",
     (e) => {
-      tx = e.clientX + OFFSET_X
-      ty = e.clientY + OFFSET_Y
+      tx = e.clientX
+      ty = e.clientY
     },
     { passive: true },
   )
 
   const tick = () => {
-    cx += (tx - cx) * EASE
-    cy += (ty - cy) * EASE
-    dot.style.transform = `translate(${cx}px, ${cy}px) translate(-50%, -50%)`
+    cx += (tx - cx) * 0.15
+    cy += (ty - cy) * 0.15
+    labelEl!.style.transform = `translate(${cx}px, ${cy}px)`
     requestAnimationFrame(tick)
   }
   tick()
+}
+
+/** Show/hide the cursor label text (null hides it). */
+export function setCursorLabel(text: string | null) {
+  if (!labelEl) return
+  if (text) {
+    labelEl.textContent = text
+    labelEl.classList.add("is-visible")
+  } else {
+    labelEl.classList.remove("is-visible")
+  }
 }

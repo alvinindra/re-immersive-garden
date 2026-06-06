@@ -14,9 +14,10 @@
 }
 
 :root {
-  --bg: #bdbdbd;
-  --ink: #1a1a1a;
-  --ui: 0.7291666667vw; /* ~14px @1920 */
+  --bg: #bdbdbd; /* matches the relief at-rest plaster tone */
+  --ink: #030303;
+  --light: #e8e8e8;
+  --ui: 0.9722222222vw; /* ~14px @1440 */
 }
 
 * {
@@ -28,11 +29,19 @@
 html,
 body {
   width: 100%;
-  height: 100%;
-  overflow: hidden;
   background: var(--bg);
   color: var(--ink);
   font-family: HelveticaNeueRegular, sans-serif;
+  overflow-x: hidden;
+}
+
+/* Lenis: let the document grow to content height and smooth-scroll it */
+html.lenis,
+html.lenis body {
+  height: auto;
+}
+.lenis.lenis-smooth {
+  scroll-behavior: auto !important;
 }
 
 #webgl {
@@ -42,6 +51,11 @@ body {
   height: 100vh;
   display: block;
   z-index: 0;
+}
+
+#scroll-content {
+  position: relative;
+  z-index: 1;
 }
 
 .visually-hidden {
@@ -56,38 +70,45 @@ body {
   border: 0;
 }
 
-/* shared label style for the UI chrome */
-.topbar__about,
-.hero__scroll,
-.footbar__projects {
+/* ---- top bar -------------------------------------------------------------- */
+.topbar {
+  position: fixed;
+  z-index: 5;
+  top: 2.2vw;
+  right: 2.7777vw;
+  display: flex;
+  align-items: center;
+  gap: 1.4vw;
+}
+.topbar__about {
   font-family: HelveticaNeueRegular, sans-serif;
   font-size: clamp(12px, var(--ui), 15px);
   letter-spacing: 0.01em;
   color: var(--ink);
   text-decoration: none;
+  transition: opacity 0.4s ease;
+}
+.topbar__about:hover {
+  opacity: 0.6;
+}
+.topbar__monogram {
+  font-family: PSTimes, serif;
+  font-size: 1.15vw;
+  line-height: 1;
+  border: 1px solid var(--ink);
+  border-radius: 2px;
+  padding: 0.2em 0.32em;
 }
 
-/* ---- top bar ---- */
-.topbar {
-  position: fixed;
-  z-index: 3;
-  top: 2.4vw;
-  right: 2.7777vw;
-  display: flex;
-  align-items: center;
-}
-
-/* ---- hero (vertically centered row) ---- */
+/* ---- hero ----------------------------------------------------------------- */
 .hero {
   position: relative;
-  z-index: 2;
   height: 100vh;
   display: flex;
   align-items: center;
   pointer-events: none;
   user-select: none;
 }
-
 .hero__logo {
   position: absolute;
   left: 2.7777vw;
@@ -113,62 +134,265 @@ body {
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
-
 .hero__tagline {
   width: 100%;
   text-align: center;
   font-family: PSTimes, serif;
   font-weight: 400;
-  font-size: 1.5277777778vw; /* ~29px @1920 */
+  font-size: 1.5277777778vw;
   line-height: 1.1;
   color: var(--ink);
 }
-
 .hero__scroll {
   position: absolute;
   right: 2.7777vw;
+  font-family: HelveticaNeueRegular, sans-serif;
+  font-size: clamp(12px, var(--ui), 15px);
 }
 
-/* ---- footer ---- */
-.footbar {
-  position: fixed;
-  z-index: 3;
-  left: 0;
-  right: 0;
-  bottom: 2.4vw;
-  padding: 0 2.7777vw;
+/* ---- grid + media blocks -------------------------------------------------- */
+#blocks {
+  display: block;
+}
+.mediaBlock {
+  width: 100%;
+}
+.grid {
+  display: grid;
+  grid-template-columns: repeat(13, 1fr);
+  column-gap: 0.7vw;
+  align-items: center;
+  padding: 0 4vw;
+}
+.media {
+  position: relative;
+  width: 100%;
+  /* transparent: the WebGL plane behind shows through; the placeholder only
+     reserves layout + captures hover. */
+  pointer-events: auto;
+  cursor: pointer;
+}
+.media__caption {
+  display: none; /* desktop shows project name via the cursor, not inline */
+}
+
+/* project = stacked media + legend rows, with the real site's vertical rhythm */
+.projectBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 8vw;
+  width: 100%;
+}
+.projectBlock + .projectBlock {
+  margin-top: 18vw;
+}
+/* first project after the showreel keeps a comfortable gap */
+#blocks > .mediaBlock + .projectBlock {
+  margin-top: 12vw;
+}
+.mediaBlock.textOnly {
+  margin-top: -5vw;
+  margin-bottom: -5vw;
+}
+/* showreel sits a screen below the hero */
+#blocks > .mediaBlock:first-child {
+  margin-top: 6vw;
+}
+
+.legend {
+  font-family: PSTimes, serif;
+  font-size: 1.5277777778vw;
+  font-weight: 400;
+  line-height: 1.4;
+  color: var(--ink);
+  align-self: center;
+}
+
+/* ---- centred text blocks ("Our approach", "Our mission") ------------------ */
+.textBlock {
+  width: 100%;
+  min-height: 86vh;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  pointer-events: none;
 }
-.footbar__projects {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5em;
-  pointer-events: auto;
+.textBlock .grid {
+  width: 100%;
 }
-.footbar__projects span {
-  font-size: 0.85em;
+.textBlock__inner {
+  grid-column: 4 / span 7;
+  text-align: center;
+  font-family: PSTimes, serif;
+  color: var(--ink);
 }
-.footbar__circle {
-  width: 1.7vw;
-  height: 1.7vw;
-  border: 1px solid var(--ink);
-  border-radius: 50%;
+.textBlock__label {
+  font-size: 1.5277777778vw;
+  line-height: 1.2;
+  opacity: 0.55;
+  margin-bottom: 1.4vw;
+}
+.textBlock__body {
+  font-size: 1.9444444444vw;
+  line-height: 1.25;
+}
+.textBlock .word {
+  display: inline-block;
+  margin-right: 0.26em;
+  opacity: 0;
+  transform: translateY(0.7em);
+  transition: opacity 0.9s ease, transform 0.9s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.textBlock.is-in .word {
+  opacity: 1;
+  transform: none;
 }
 
-/* ---- custom cursor (real site's CursorElt) ---- */
-/* small black dot that rides on the pointer; native arrow stays visible. */
-.cursor__follow {
+/* ---- black footer --------------------------------------------------------- */
+.homeFooter {
+  position: relative;
+  height: 100dvh;
+  /* transparent: the fixed relief (darkened near the bottom) shows through */
+  background: transparent;
+  color: var(--light);
+  overflow: hidden;
+}
+.homeFooter__email {
+  position: absolute;
+  left: 50%;
+  top: 46.75%;
+  transform: translate(-50%, -50%);
+  z-index: 1;
+  font-family: PSTimes, serif;
+  font-size: 3.0555555556vw;
+  font-weight: 400;
+  line-height: 1.2;
+  color: var(--light);
+  text-decoration: none;
+  transition: opacity 0.4s ease;
+}
+.homeFooter__email:hover {
+  opacity: 0.6;
+}
+.homeFooter__address {
+  position: absolute;
+  left: 50%;
+  bottom: 5.5555vw;
+  transform: translateX(-50%);
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  font-family: HelveticaNeueRegular, sans-serif;
+  font-size: clamp(12px, var(--ui), 15px);
+  line-height: 1.4;
+  color: var(--light);
+  opacity: 0.5;
+}
+.homeFooter__networks {
+  position: absolute;
+  right: 2.7777vw;
+  bottom: 2.7777vw;
+  z-index: 1;
+  display: flex;
+  gap: 2.7777vw;
+  font-family: HelveticaNeueRegular, sans-serif;
+  font-size: clamp(12px, var(--ui), 15px);
+}
+.homeFooter__networks a {
+  color: var(--light);
+  text-decoration: none;
+  transition: opacity 0.4s ease;
+}
+.homeFooter__networks a:hover {
+  opacity: 0.6;
+}
+
+/* ---- "See all projects" button (bottom-left) ------------------------------ */
+.allProjects {
+  position: fixed;
+  z-index: 5;
+  left: 0;
+  bottom: 0;
+  padding: 2.2vw 2.7777vw;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+  color: var(--ink);
+  text-decoration: none;
+  font-family: HelveticaNeueRegular, sans-serif;
+  font-size: clamp(12px, var(--ui), 15px);
+  white-space: nowrap;
+  transition: opacity 0.4s ease, color 0.5s ease;
+}
+.allProjects:hover {
+  opacity: 0.6;
+}
+.allProjects__arrow {
+  font-size: 0.85em;
+}
+/* hidden in fast-scroll mode (matches real site) */
+body.is-fast .allProjects {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* ---- cursor hover label --------------------------------------------------- */
+.cursor__label {
   position: fixed;
   top: 0;
   left: 0;
-  z-index: 10;
-  width: 4px;
-  height: 4px;
-  border-radius: 50%;
-  background: #030303;
+  z-index: 20;
+  padding-left: 18px;
+  margin-top: -0.6em;
+  font-family: HelveticaNeueRegular, sans-serif;
+  font-size: clamp(12px, var(--ui), 15px);
+  color: #030303;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  will-change: transform;
+}
+.cursor__label.is-visible {
+  opacity: 1;
+}
+body.is-dark .cursor__label {
+  color: var(--light);
+}
+
+/* ---- HomeScrollCursor dots (fixed origin top-left, follows pointer) ------- */
+.scrollCursor {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 15;
   pointer-events: none;
   will-change: transform;
+}
+.scrollCursor .dots {
+  position: absolute;
+  left: 0;
+  top: 0;
+}
+.scrollCursor .dot {
+  position: absolute;
+  width: 3px;
+  height: 3px;
+  border-radius: 100%;
+  background: #030303;
+  opacity: 0;
+  will-change: transform;
+}
+.scrollCursor .dot__default {
+  opacity: 1;
+}
+.scrollCursor .dots__fast .dot {
+  background: #6e6e6e;
+  transition: opacity 0.6s ease;
+}
+
+@media (max-width: 1024px) {
+  .scrollCursor {
+    display: none;
+  }
 }

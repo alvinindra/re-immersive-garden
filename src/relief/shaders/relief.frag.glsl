@@ -183,5 +183,5 @@ void main() {
   vec3 blackRender = vec3(blackFluidR, blackFluidG, blackFluidB);
   color = mix(whiteRender, blackRender, uSwitchColorTransition);
   gl_FragColor.rgb = color;
-  gl_FragColor.a = alpha;
+  gl_FragColor.a = alpha * uOpacity; // lets the home/footer reliefs cross-fade
 }
