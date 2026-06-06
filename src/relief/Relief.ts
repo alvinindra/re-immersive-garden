@@ -235,12 +235,10 @@ export class Relief {
               vertexShader: reliefVert,
               fragmentShader: reliefFrag,
               side: DoubleSide,
-              // transparent so uOpacity can fade the home relief out at the footer
-              // (at full alpha this is pixel-identical to opaque — the earlier
-              // quality loss was from the lowered DPR, not this). depthWrite off so
-              // the footer relief composites over it.
-              transparent: true,
-              depthWrite: false,
+              // opaque + depthWrite ON, same as main. With transparent + depthWrite
+              // off, the 18 relief tiles alpha-blended each other instead of depth-
+              // occluding, producing fragmented dark blobs. The footer relief draws
+              // over this via depthTest:false (see loadFooter).
               uniforms: {
                 ...this.shared,
                 tBake1: { value: tBake1 },
@@ -285,11 +283,15 @@ export class Relief {
               fragmentShader: reliefFrag,
               side: FrontSide, // front only — avoid flat backface slabs in the depth
               transparent: true,
-              depthTest: true,
-              depthWrite: true, // self-sort the layered flowers
+              depthTest: false, // always composite over the opaque home relief
+              depthWrite: false,
               uniforms: {
                 ...this.shared,
                 uOpacity: this.footerOpacity, // independent fade
+                // footer-only brightness: dim base so the dark floral relief reads
+                // on the near-black footer background (home keeps its bright remap)
+                uBrightnessFactor: { value: 0.18 },
+                uBrightnessOffset: { value: 0.02 },
                 tBake1: { value: tBake1 },
                 tBake2: { value: tBake2 },
               },
@@ -436,13 +438,15 @@ export class Relief {
     this.shared.uScreenScroll.value = scrollPct
     this.shared.uScrollSpeed.value = speed
 
-    // footer relief cross-fade over the last 10% of scroll
+    // footer relief cross-fade over the last 10% of scroll. Home stays opaque
+    // (uOpacity=1) — its tiles must depth-occlude each other; only the FOOTER uses
+    // its own footerOpacity to fade in on top via depthTest:false. Clear color
+    // fades to black so the footer reads on a dark background.
     const t = Math.max(0, Math.min(1, (scrollPct - 0.9) / 0.1))
     const fp = t * t * (3 - 2 * t)
     this.footerProgress = fp
     this.footerModel.visible = fp > 0.001
     this.footerOpacity.value = fp
-    this.shared.uOpacity.value = 1 - fp
     this.setDarkness(fp)
   }
 
@@ -452,6 +456,9 @@ export class Relief {
   private clearTmp = new Color()
   /** 0 = grey home relief, 1 = dark footer relief. Drives the bottom fade-to-black. */
   setDarkness(d: number) {
+    // fade the clear color toward black AND dim the HOME relief brightness toward
+    // dark. The footer relief has its OWN brightness uniforms (set in loadFooter),
+    // so footer stays at its dim baseline and doesn't double-dim with this.
     this.clearTmp.copy(this.clearGrey).lerp(this.clearBlack, d)
     this.renderer.setClearColor(this.clearTmp, 1)
     this.shared.uBrightnessFactor.value = 0.6 + (0.18 - 0.6) * d
