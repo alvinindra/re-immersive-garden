@@ -84,6 +84,7 @@ export class Gallery {
   private velNorm = 0
   private deform = 0
   private rawVel = 0
+  private t0 = performance.now()
 
   // reused scratch for save/restore around render-target passes
   private savedClear = new Color()
@@ -136,6 +137,8 @@ export class Gallery {
           uOpacity: { value: 0 },
           uHasTexture: { value: false },
           uPlaceholder: { value: new Color(0.74, 0.74, 0.74) },
+          uTime: { value: 0 },
+          uMouseLocal: { value: new Vector2(0.5, 0.5) },
         },
       })
       const mesh = new Mesh(this.geometry, material)
@@ -168,6 +171,13 @@ export class Gallery {
       el.addEventListener("pointerleave", () => {
         plane.hoverTarget = 0
         this.onCursor(null)
+      })
+      el.addEventListener("pointermove", (e) => {
+        const r = el.getBoundingClientRect()
+        ;(plane.material.uniforms.uMouseLocal.value as Vector2).set(
+          (e.clientX - r.left) / r.width,
+          1 - (e.clientY - r.top) / r.height,
+        )
       })
       el.addEventListener("click", () => {
         if (plane.uri) window.open("https://immersive-g.com/" + plane.uri, "_blank")
@@ -328,6 +338,7 @@ export class Gallery {
       u.uHover.value = lerp(u.uHover.value, p.hoverTarget, 0.045)
       u.uScrollVel.value = this.velNorm
       u.uDeform.value = this.deform
+      u.uTime.value = (performance.now() - this.t0) / 1000
 
       const inView = r.top < h * 0.92 && r.bottom > h * 0.08
       if (inView && p.loaded) p.opacityTarget = 1

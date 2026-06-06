@@ -97,6 +97,9 @@ export class Relief {
   private footerOpacity: IUniform = { value: 0 }
   private footerProgress = 0
   private footerEnvMap: import("three").Texture | null = null
+  private footerCursorLight: import("three").PointLight | null = null
+  private footerCursorTarget: Vector3 | null = null
+  private pointerVp = new Vector2(0.5, 0.5)
 
   private shared: Record<string, IUniform>
   private clock = { start: performance.now() }
@@ -284,13 +287,20 @@ export class Relief {
     ).RoomEnvironment
     this.footerEnvMap = pmrem.fromScene(new RoomEnv(), 0.04).texture
     this.footerScene.environment = this.footerEnvMap
-    this.footerScene.environmentIntensity = 0.25 // low: keep shadows DEEP black
-    // single key light hits the petals → bright accents on near-black, like real
-    const { DirectionalLight, AmbientLight } = await import("three")
-    const key = new DirectionalLight(0xffffff, 2.4)
-    key.position.set(0.4, 1, 0.8)
-    const fill = new AmbientLight(0xffffff, 0.05)
-    this.footerScene.add(key, fill)
+    this.footerScene.environmentIntensity = 0.35
+    // Real site: cursorLight() + numberLight() — a moving spotlight at the cursor
+    // illuminates the petals (PointLight), plus a strong ambient lift and a key
+    // directional. Result: deep-black shadows with bright cream highlights where
+    // the cursor passes — matches the live footer.
+    const { DirectionalLight, AmbientLight, PointLight, Vector3: V3 } = await import("three")
+    const key = new DirectionalLight(0xffffff, 1.2)
+    key.position.set(0.3, 1, 0.8)
+    const amb = new AmbientLight(0xfff4e0, 0.55) // slightly warm fill
+    const cursorLight = new PointLight(0xfff1d6, 60, 10, 1.2) // strong warm spotlight
+    cursorLight.position.set(0, 0, 1.5)
+    this.footerScene.add(key, amb, cursorLight)
+    this.footerCursorLight = cursorLight
+    this.footerCursorTarget = new V3(0, 0, 1.2)
 
     return new Promise((resolve, reject) => {
       gltf.load(
@@ -448,6 +458,10 @@ export class Relief {
       e.clientX / window.innerWidth,
       1 - e.clientY / window.innerHeight,
     )
+    this.pointerVp.set(
+      e.clientX / window.innerWidth,
+      e.clientY / window.innerHeight,
+    )
   }
 
   /** Register the scrolling media gallery, drawn over the relief each frame. */
@@ -573,8 +587,23 @@ export class Relief {
     this.renderer.render(this.scene, this.camera)
 
     // footer pass: when the bottom approaches, render the GLB's own scene + camera
-    // on top of the home relief. Uses the GLB's PBR materials with env-lit flowers.
+    // on top of the home relief. Uses the GLB's PBR materials with env-lit flowers
+    // + a moving cursor PointLight (the real site's cursorLight()).
     if (this.footerProgress > 0.001 && this.footerCamera && this.footerModel.visible) {
+      // map viewport pointer (0..1) to a world position in front of the flowers
+      if (this.footerCursorLight && this.footerCursorTarget) {
+        const cam = this.footerCamera
+        const fovRad = (cam.fov * Math.PI) / 180
+        const z = 0.2 // just in front of the model centre
+        const distZ = cam.position.z - z
+        const vh = 2 * Math.tan(fovRad / 2) * distZ
+        const vw = vh * cam.aspect
+        const x = (this.pointerVp.x - 0.5) * vw
+        const y = (0.5 - this.pointerVp.y) * vh
+        // ease toward target so the light glides
+        this.footerCursorTarget.set(x, y, z + 1.0)
+        this.footerCursorLight.position.lerp(this.footerCursorTarget, 0.18)
+      }
       this.renderer.autoClear = false
       this.renderer.clearDepth()
       this.renderer.render(this.footerScene, this.footerCamera)
