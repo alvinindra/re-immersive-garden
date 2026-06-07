@@ -320,7 +320,7 @@ export class Relief {
     this.footerNoise = noise
 
     const baseDefines: Record<string, string> = {
-      UV: "uv1",
+      UV: "uv",
       HAS_WIND: "1",
       USE_LUT: "1",
       CURSOR_DECAY: "0.3",
@@ -367,6 +367,14 @@ export class Relief {
       const srcMat = child.material as MeshStandardMaterial
       const useAlpha = srcMat.metalnessMap != null
       const range = ILLUMINATION_RANGES[id] || [0, 0.4]
+
+      // The flower atlases bake to TEXCOORD_1 (every baseColor/emissive/alpha
+      // sampler in the GLB uses texCoord=1). Three's ShaderMaterial only
+      // auto-declares the `uv` attribute, so swap uv1 into the uv slot — uv0
+      // isn't sampled by anything on these meshes anyway.
+      const geo = child.geometry
+      const uv1Attr = geo.getAttribute("uv1")
+      if (uv1Attr) geo.setAttribute("uv", uv1Attr)
 
       const map = srcMat.map
       const lightMap = srcMat.emissiveMap

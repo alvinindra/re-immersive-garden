@@ -1,4 +1,9 @@
 // Footer flower vertex shader (GLSL3, CPU wind path)
+//
+// three.js auto-declares position/normal/uv. uv1 (TEXCOORD_1, renamed from
+// uv2→uv1 in r152) only gets declared when the material defines USE_UV1 — we
+// set that in baseDefines (Relief.ts), since the footer baked atlases sample
+// from TEXCOORD_1.
 
 out vec2 vUv;
 out vec3 vToEye;
