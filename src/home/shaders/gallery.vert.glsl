@@ -17,10 +17,9 @@ void main() {
 
   vec3 pos = position;
 
-  // Hover inset: shrink ~4% toward the centre while hovered (real site: ~3%),
-  // with a gentle edge widen so the plane reads as a soft distortion, not a pop.
-  pos.xy *= mix(1.0, 0.96, uHover);
-  pos.x *= mix(1.0, 1.0 + 0.04 * abs(uv.y - 0.5) * 2.0, uHover);
+  // Real site barely insets the plane on hover (≈3px), so the geometry effectively
+  // stays put — the hover treatment lives in the fragment shader. No vertex hover
+  // scale here (the old ~4% shrink + edge-widen made the plane "pop").
 
   vec4 clip = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
 

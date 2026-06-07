@@ -46,9 +46,8 @@ void main() {
     vUv.y * ratio.y + (1.0 - ratio.y) * 0.5
   );
 
-  // hover distortion: smoothly zoom the texture in toward the centre (~8%)
-  uv = (uv - 0.5) * (1.0 - 0.08 * uHover) + 0.5;
-  // subtle breathing (real site: sin(uTime*0.2)*0.02 mixed with uHover)
+  // hover: real site only adds a slow ±2% breathing scale (uvImage *= mix(1.0,
+  // 1.0 + sin(uTime*0.2)*0.02, uHover)) — no big zoom-in. Keep just the breathe.
   uv = (uv - 0.5) * mix(1.0, 1.0 + sin(uTime * 0.2) * 0.02, uHover) + 0.5;
 
   vec3 color = uPlaceholder;
@@ -59,25 +58,23 @@ void main() {
     texA = tex.a; // glb render-target planes carry real transparency
   }
 
-  // hover noise mask centred on the mouse — drives darken stipple + brightness
-  // boost in localised splotches. Real site: tMaskNoise + mouseFalloff smoothstep.
+  // hover noise mask centred on the mouse — a localised darken stipple that tracks
+  // the cursor, exactly the real site's tMaskNoise + mouseFalloff smoothstep:
+  //   mouseFalloff = smoothstep(uHover*0.7 + sin(uTime)*0.05, 0.0, length(mouseDiff))
+  //   noiseMask    = smoothstep(0.3, 0.45, mouseFalloff * uHover * hoverNoise)
+  // (aspect-correct the x so the falloff stays circular on wide planes).
   vec2 mouseDiff = uMouseLocal - vUv;
-  float mouseFalloff = smoothstep(uHover * 0.7 + sin(uTime) * 0.04, 0.0,
+  mouseDiff.x *= uPlaneAspect;
+  float mouseFalloff = smoothstep(uHover * 0.7 + sin(uTime) * 0.05, 0.0,
                                   length(mouseDiff));
   float hoverNoise = noise2(vUv * 5.0 + uTime * 0.05);
-  float noiseMask = smoothstep(0.3, 0.55,
+  float noiseMask = smoothstep(0.3, 0.45,
                                mouseFalloff * uHover * hoverNoise);
 
-  // hover dim (subtle, broad)
-  color *= mix(1.0, 0.86, uHover);
-  // localised darken + slight saturation drop where noiseMask hits
+  // broad hover dim toward 20% black (real: color = mix(color, color*0.8, uHover))
+  color *= 1.0 - 0.2 * uHover;
+  // localised darken where the cursor-tracked noise mask hits
   color = mix(color, color * 0.65, noiseMask);
-
-  // hover inner border (thin dark frame, ~60% black at edge — fades with hover)
-  vec2 b = smoothstep(vec2(0.0), vec2(0.012), vUv)
-         * smoothstep(vec2(0.0), vec2(0.012), 1.0 - vUv);
-  float inside = b.x * b.y;
-  color = mix(color, color * 0.4, (1.0 - inside) * uHover);
 
   gl_FragColor = vec4(color, texA * uOpacity);
 }

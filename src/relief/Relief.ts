@@ -4,12 +4,14 @@ import {
   DoubleSide,
   FrontSide,
   GLSL3,
-  PMREMGenerator,
   Group,
   LinearSRGBColorSpace,
+  Matrix4,
   Mesh,
+  Quaternion,
   MeshStandardMaterial,
   PerspectiveCamera,
+  Raycaster,
   RepeatWrapping,
   SRGBColorSpace,
   Scene,
@@ -25,8 +27,22 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js"
 import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js"
 import { Flowmap } from "./Flowmap"
 import { FluidSimulation } from "./FluidSimulation"
+import { loadLut, type LutData } from "./LutLoader"
+import {
+  pseudoNoise,
+  initFlowerWind,
+  updateFlowerWind,
+  updateCursorWind,
+  CursorDeltaBuffer,
+  ILLUMINATION_RANGES,
+  type FlowerWindState,
+} from "./FooterWind"
 import reliefVert from "./shaders/relief.vert.glsl"
 import reliefFrag from "./shaders/relief.frag.glsl"
+import footerVert from "./shaders/footer.vert.glsl"
+import footerFrag from "./shaders/footer.frag.glsl"
+
+const _identityQuat = new Quaternion()
 
 // Real-site home-relief config (default bundle: relief.*)
 const CONFIG = {
@@ -87,19 +103,33 @@ export class Relief {
   private homeMinY = 0
   private heroLift = 0 // lifts the relief content toward the top at the hero
 
-  // dark footer relief (footer_compressed.glb). Rendered in its OWN scene with
-  // the GLB's embedded camera + env map for proper PBR lighting (the real site
-  // uses a baked-light shader; we approximate by keeping the GLB's native PBR
-  // materials with an environment so the flowers actually catch highlights).
+  // Footer relief (footer_compressed.glb) — custom ShaderMaterial with baked
+  // light reveal, cursor raycasting, LUT color grading, wind, fluid effect.
   private footerScene = new Scene()
   private footerModel = new Group()
   private footerCamera: PerspectiveCamera | null = null
-  private footerOpacity: IUniform = { value: 0 }
   private footerProgress = 0
-  private footerEnvMap: import("three").Texture | null = null
-  private footerCursorLight: import("three").PointLight | null = null
-  private footerCursorTarget: Vector3 | null = null
   private pointerVp = new Vector2(0.5, 0.5)
+  private footerCamBaseQuat = new Quaternion()
+  private fcx = 0
+  private fcy = 0
+
+  // footer wind + cursor state
+  private footerFlowers: FlowerWindState[] = []
+  private footerProxy: Mesh | null = null
+  private footerRaycaster = new Raycaster()
+  private footerCursorPoint = new Vector3()
+  private footerCursorTarget = new Vector3()
+  private footerLastCursorTarget = new Vector3()
+  private footerCursorInit = false
+  private footerDeltaBuffer = new CursorDeltaBuffer()
+  private footerLightFade = 0
+  private footerBakedLightProgress = 0
+  private footerRevealStarted = false
+  private footerWaveTriggered = false
+  private footerLut: LutData | null = null
+  private footerNoise: Texture | null = null
+  private footerWindDirection = new Vector3(1, 0, 0)
 
   private shared: Record<string, IUniform>
   private clock = { start: performance.now() }
@@ -269,97 +299,201 @@ export class Relief {
     })
   }
 
-  /** Load the dark footer relief (its own GLB), framed by its embedded camera and
-   *  rendered in its own scene with an environment map. Crossfades in at the
-   *  bottom — opacity follows scrollPct via footerOpacity. */
   async loadFooter(url: string): Promise<void> {
     const draco = new DRACOLoader()
     draco.setDecoderPath("/draco/")
-    const gltf = new GLTFLoader()
-    gltf.setDRACOLoader(draco)
+    const gltfLoader = new GLTFLoader()
+    gltfLoader.setDRACOLoader(draco)
 
-    // env map: gives the GLB's PBR materials something to reflect so the flowers
-    // catch light highlights (the real site uses a baked lightmap; this is a fast,
-    // generic stand-in that produces the same lit-flower look).
-    const pmrem = new PMREMGenerator(this.renderer)
-    const RoomEnv = (
-      await import("three/examples/jsm/environments/RoomEnvironment.js")
-    ).RoomEnvironment
-    this.footerEnvMap = pmrem.fromScene(new RoomEnv(), 0.04).texture
-    this.footerScene.environment = this.footerEnvMap
-    this.footerScene.environmentIntensity = 0.35
-    // Real site: cursorLight() + numberLight() — a moving spotlight at the cursor
-    // illuminates the petals (PointLight), plus a strong ambient lift and a key
-    // directional. Result: deep-black shadows with bright cream highlights where
-    // the cursor passes — matches the live footer.
-    const { DirectionalLight, AmbientLight, PointLight, Vector3: V3 } = await import("three")
-    const key = new DirectionalLight(0xffffff, 1.2)
-    key.position.set(0.3, 1, 0.8)
-    const amb = new AmbientLight(0xfff4e0, 0.55) // slightly warm fill
-    const cursorLight = new PointLight(0xfff1d6, 60, 10, 1.2) // strong warm spotlight
-    cursorLight.position.set(0, 0, 1.5)
-    this.footerScene.add(key, amb, cursorLight)
-    this.footerCursorLight = cursorLight
-    this.footerCursorTarget = new V3(0, 0, 1.2)
+    const [lutData, noise, data] = await Promise.all([
+      loadLut("/webgl/footer/lut.3dl"),
+      new Promise<Texture>((res) => {
+        const t = new TextureLoader().load("/webgl/global/noises/rgb-noise.jpg", res)
+        t.wrapS = t.wrapT = RepeatWrapping
+      }),
+      new Promise<{ scene: Group; cameras: PerspectiveCamera[] }>((res, rej) =>
+        gltfLoader.load(url, (d) => res(d as never), undefined, rej),
+      ),
+    ])
 
-    return new Promise((resolve, reject) => {
-      gltf.load(
-        url,
-        (data) => {
-          // GLB has baked albedo (.map) + baked lightmap (.emissiveMap). The real
-          // footer composes them: color = albedo * lightmap. We reuse MeshStandardMaterial
-          // and set emissive=white so emissiveMap acts as that baked light layer,
-          // plus an env map for subtle highlights. Result reads lit-on-black like real.
-          data.scene.traverse((child) => {
-            if (!(child instanceof Mesh)) return
-            // hide the backdrop / proxy cloth meshes — they cover the scene with a
-            // solid white slab in the GLB; we want pure black + flowers only.
-            if (/proxy|cloth/i.test(child.name)) {
-              child.visible = false
-              return
-            }
-            const m = child.material as MeshStandardMaterial
-            if (m.map) m.map.colorSpace = SRGBColorSpace
-            // GLB's emissiveMap isn't a clean lightmap — disable it (was muddying
-            // colors). Lighting comes from env + key/ambient instead.
-            m.emissive.setRGB(0, 0, 0)
-            m.emissiveIntensity = 0
-            m.metalness = 0
-            m.roughness = 0.8
-            m.transparent = true
-            m.depthWrite = true
-            const orig = m.onBeforeRender
-            m.onBeforeRender = (...args) => {
-              m.opacity = this.footerOpacity.value as number
-              orig?.apply(m, args)
-            }
-          })
-          this.footerModel.add(data.scene)
+    this.footerLut = lutData
+    this.footerNoise = noise
 
-          // Fit a perspective camera to the model so the floral relief fills the
-          // viewport (the GLB's embedded cam zooms onto a single flower — wrong for
-          // our use). Distance derived from bounding sphere + a small overscan.
-          const aspect = window.innerWidth / window.innerHeight
-          const cam = new PerspectiveCamera(28, aspect, 0.1, 1000)
-          this.footerModel.updateWorldMatrix(true, true)
-          const box = new Box3().setFromObject(this.footerModel)
-          const center = box.getCenter(new Vector3())
-          const size = box.getSize(new Vector3())
-          // re-centre the model at the origin so the camera looks straight at it
-          this.footerModel.position.sub(center)
-          const fitH = size.y
-          const fitW = size.x / aspect
-          const fit = Math.max(fitH, fitW)
-          const dist = (fit / 2) / Math.tan((cam.fov / 2) * (Math.PI / 180))
-          cam.position.set(0, 0, dist * 0.8) // 0.8 = overscan (fill + crop edges)
-          cam.lookAt(0, 0, 0)
-          this.footerCamera = cam
-          resolve()
-        },
-        undefined,
-        reject,
-      )
+    const baseDefines: Record<string, string> = {
+      UV: "uv1",
+      HAS_WIND: "1",
+      USE_LUT: "1",
+      CURSOR_DECAY: "0.3",
+      CURSOR_COLOR: "vec3(1.0, 1.0, 1.0)",
+      DIFFUSE: "1.0",
+      SHININESS: "5.0",
+      SPECULAR: "4.0",
+      SCENE_CENTER: "vec3(0.0, 0.15, 0.0)",
+      FADE_EASE_1: "quadraticOut",
+      FADE_EASE_2: "linear",
+      FADE_EASE_3: "quinticOut",
+      EFFECT_AMPLITUDE: "0.15",
+      EFFECT_SHADOW_STRENGTH: "1.0",
+      EFFECT_FLUID_MAGNITUDE: "0.1",
+      EFFECT_FLUID_RED_COEF: "1.0",
+      EFFECT_FLUID_GREEN_COEF: "3.1",
+      EFFECT_FLUID_BLUE_COEF: "4.3",
+      EFFECT_LINES_SPEED: "1.0",
+      EFFECT_LINES_SCALE: "1.0",
+      EFFECT_LINES_STRENGTH: "0.5",
+      EFFECT_LINES_WAVE_LENGTH: "1.0",
+      EFFECT_BASE_COLOR: "vec3(0.1647, 0.9804, 0.9804)",
+      EFFECT_BASE_THRESHOLD: "0.2",
+      EFFECT_HUE_SHIFT: "0.0",
+      EFFECT_COLOR_RANGE: "1.0",
+    }
+
+    const drawing = this.renderer.getDrawingBufferSize(new Vector2())
+    const maxAniso = this.renderer.capabilities.getMaxAnisotropy()
+
+    data.scene.traverse((child) => {
+      if (!(child instanceof Mesh)) return
+
+      if (/proxy/i.test(child.name)) {
+        child.visible = false
+        this.footerProxy = child
+        return
+      }
+
+      const nameMatch = child.name.match(/^(\w+?)(\d+)_low/)
+      if (!nameMatch) return
+      const id = `07_${nameMatch[1]}_${nameMatch[2].padStart(2, "0")}`
+
+      const srcMat = child.material as MeshStandardMaterial
+      const useAlpha = srcMat.metalnessMap != null
+      const range = ILLUMINATION_RANGES[id] || [0, 0.4]
+
+      const map = srcMat.map
+      const lightMap = srcMat.emissiveMap
+      const alphaMap = useAlpha ? srcMat.metalnessMap : null
+
+      if (map) { map.colorSpace = LinearSRGBColorSpace; map.anisotropy = maxAniso; map.needsUpdate = true }
+      if (lightMap) { lightMap.colorSpace = LinearSRGBColorSpace; lightMap.anisotropy = maxAniso; lightMap.needsUpdate = true }
+      if (alphaMap) { alphaMap.colorSpace = LinearSRGBColorSpace; alphaMap.anisotropy = maxAniso; alphaMap.needsUpdate = true }
+
+      const defines: Record<string, string> = { ...baseDefines }
+      if (useAlpha) defines.USE_ALPHA_MAP = "1"
+
+      const uniforms: Record<string, IUniform> = {
+        uMap: { value: map },
+        uLightMap: { value: lightMap },
+        uNoise: { value: noise },
+        uIlluminationRange: { value: new Vector2(range[0], range[1]) },
+        uCursorPoint: { value: this.footerCursorPoint },
+        uCursorIntensity: { value: 0 },
+        uBakedLightIntensity: { value: 0 },
+        uXBounds: { value: new Vector2(0, 1) },
+        tFluidFlowmap: { value: this.fluid.texture },
+        uTime: { value: 0 },
+        uWaveTime: { value: 0 },
+        uFooterOpacity: { value: 0 },
+        uResolution: { value: new Vector2(drawing.x, drawing.y) },
+        uLut: { value: lutData.texture3D },
+        uLutSize: { value: lutData.size },
+        uWindMatrix: { value: new Matrix4() },
+        uMouseWindMatrix: { value: new Matrix4() },
+      }
+      if (useAlpha) uniforms.uAlphaMap = { value: alphaMap }
+
+      // Material config matches the reference site exactly: FrontSide, and only the
+      // alpha-mapped flowers are transparent (default depth write/test). The shader's
+      // own `discard` (alpha < 0.05) keeps the petal edges crisp.
+      const mat = new ShaderMaterial({
+        glslVersion: GLSL3,
+        vertexShader: footerVert,
+        fragmentShader: footerFrag,
+        defines,
+        side: FrontSide,
+        transparent: useAlpha,
+        uniforms,
+      })
+
+      child.material = mat
+
+      const windState = initFlowerWind(child)
+      this.footerFlowers.push(windState)
     })
+
+    this.footerModel.add(data.scene)
+    this.footerModel.position.y = 1.0
+    this.footerScene.updateWorldMatrix(true, true)
+
+    let xMin = Infinity,
+      xMax = -Infinity
+    for (const flower of this.footerFlowers) {
+      const worldCenter = flower.meshCenter
+        .clone()
+        .applyMatrix4(flower.mesh.matrixWorld)
+      xMin = Math.min(xMin, worldCenter.x)
+      xMax = Math.max(xMax, worldCenter.x)
+    }
+    for (const flower of this.footerFlowers) {
+      const mat = flower.mesh.material as ShaderMaterial
+      ;(mat.uniforms.uXBounds.value as Vector2).set(xMin, xMax)
+    }
+
+    const aspect = window.innerWidth / window.innerHeight
+    const cam = new PerspectiveCamera(28, aspect, 0.1, 1000)
+    const src = data.cameras[0] as PerspectiveCamera | undefined
+    if (src) {
+      src.updateWorldMatrix(true, true)
+      const pos = new Vector3()
+      const quat = new Quaternion()
+      src.matrixWorld.decompose(pos, quat, new Vector3())
+      cam.position.copy(pos)
+      cam.quaternion.copy(quat)
+      cam.fov = src.fov
+    } else {
+      cam.position.set(27, 0.15, 0)
+      cam.lookAt(0, 0, 0)
+    }
+    cam.aspect = aspect
+    cam.updateProjectionMatrix()
+    this.footerCamera = cam
+    this.footerCamBaseQuat.copy(cam.quaternion)
+  }
+
+  private _footerNdc = new Vector2()
+  private _footerHits: { point: Vector3 }[] = []
+
+  private updateFooterCursor(dt: number) {
+    if (!this.footerProxy || !this.footerCamera) return
+
+    this._footerNdc.set(
+      this.pointerVp.x * 2 - 1,
+      -(this.pointerVp.y * 2 - 1),
+    )
+    this.footerRaycaster.setFromCamera(this._footerNdc, this.footerCamera)
+
+    this._footerHits.length = 0
+    this.footerProxy.raycast(this.footerRaycaster, this._footerHits as never)
+
+    if (this._footerHits.length > 0) {
+      this.footerCursorTarget.copy(this._footerHits[0].point)
+      // First valid hit: snap everything to it. Otherwise the cursor point starts at
+      // the origin — dead centre of the flower bed — and the intensity-100 cursor
+      // light glares specular over every petal until it lerps away (reads as damage).
+      // Snapping also avoids a huge first-frame cursor delta spiking the wind springs.
+      if (!this.footerCursorInit) {
+        this.footerCursorInit = true
+        this.footerCursorPoint.copy(this.footerCursorTarget)
+        this.footerLastCursorTarget.copy(this.footerCursorTarget)
+      }
+    }
+
+    const factor = 1 - Math.exp(-2 * dt)
+    this.footerCursorPoint.lerp(this.footerCursorTarget, factor)
+
+    const dx = this.footerCursorTarget.x - this.footerLastCursorTarget.x
+    const dy = this.footerCursorTarget.y - this.footerLastCursorTarget.y
+    const dz = this.footerCursorTarget.z - this.footerLastCursorTarget.z
+    this.footerDeltaBuffer.push(dx, dy, dz)
+    this.footerLastCursorTarget.copy(this.footerCursorTarget)
   }
 
   /** Find the model's horizontal center + the bird tile nearest the model center,
@@ -451,6 +585,10 @@ export class Relief {
       this.footerCamera.aspect = w / h
       this.footerCamera.updateProjectionMatrix()
     }
+    for (const flower of this.footerFlowers) {
+      const mat = flower.mesh.material as ShaderMaterial
+      ;(mat.uniforms.uResolution.value as Vector2).set(drawing.x, drawing.y)
+    }
   }
 
   private onPointerMove = (e: PointerEvent) => {
@@ -496,7 +634,6 @@ export class Relief {
     const fp = t * t * (3 - 2 * t)
     this.footerProgress = fp
     this.footerModel.visible = fp > 0.001
-    this.footerOpacity.value = fp
     this.setDarkness(fp)
     // hide the HOME relief once the footer fade is complete — otherwise its dim-
     // grey draw shows through wherever the floral relief has gaps, washing the bg
@@ -586,24 +723,63 @@ export class Relief {
 
     this.renderer.render(this.scene, this.camera)
 
-    // footer pass: when the bottom approaches, render the GLB's own scene + camera
-    // on top of the home relief. Uses the GLB's PBR materials with env-lit flowers
-    // + a moving cursor PointLight (the real site's cursorLight()).
     if (this.footerProgress > 0.001 && this.footerCamera && this.footerModel.visible) {
-      // map viewport pointer (0..1) to a world position in front of the flowers
-      if (this.footerCursorLight && this.footerCursorTarget) {
+      {
         const cam = this.footerCamera
-        const fovRad = (cam.fov * Math.PI) / 180
-        const z = 0.2 // just in front of the model centre
-        const distZ = cam.position.z - z
-        const vh = 2 * Math.tan(fovRad / 2) * distZ
-        const vw = vh * cam.aspect
-        const x = (this.pointerVp.x - 0.5) * vw
-        const y = (0.5 - this.pointerVp.y) * vh
-        // ease toward target so the light glides
-        this.footerCursorTarget.set(x, y, z + 1.0)
-        this.footerCursorLight.position.lerp(this.footerCursorTarget, 0.18)
+        this.fcx += ((this.pointerVp.x - 0.5) - this.fcx) * 0.04
+        this.fcy += ((this.pointerVp.y - 0.5) - this.fcy) * 0.04
+        cam.quaternion.copy(this.footerCamBaseQuat)
+        cam.rotateY(-this.fcx * 0.06 + Math.sin(time * 0.18) * 0.006)
+        cam.rotateX(-this.fcy * 0.05 + Math.cos(time * 0.13) * 0.004)
       }
+
+      this.updateFooterCursor(dt)
+
+      if (!this.footerRevealStarted && this.footerProgress > 0.1) {
+        this.footerRevealStarted = true
+      }
+      if (this.footerRevealStarted) {
+        this.footerBakedLightProgress = Math.min(
+          0.6,
+          this.footerBakedLightProgress + (0.6 / 8) * dt,
+        )
+        this.footerLightFade = Math.min(1, this.footerLightFade + dt)
+      }
+
+      const windAngle = pseudoNoise(time * 0.03) * Math.PI * 2
+      this.footerWindDirection.set(Math.cos(windAngle), 0, Math.sin(windAngle))
+
+      const idQ = _identityQuat
+      for (const flower of this.footerFlowers) {
+        updateFlowerWind(flower, time, this.footerWindDirection)
+        updateCursorWind(flower, this.footerDeltaBuffer, dt)
+
+        const mat = flower.mesh.material as ShaderMaterial
+        mat.uniforms.uTime.value = time
+        mat.uniforms.uBakedLightIntensity.value = this.footerBakedLightProgress
+        mat.uniforms.uCursorIntensity.value = this.footerLightFade * 100
+        mat.uniforms.uFooterOpacity.value = this.footerProgress
+        mat.uniforms.uWindMatrix.value = flower.windMatrix
+        mat.uniforms.uMouseWindMatrix.value = flower.mouseWindMatrix
+        mat.uniforms.tFluidFlowmap.value = this.fluid.texture
+
+        if (flower.leanProgress > 0.001) {
+          flower.leanProgress = Math.max(0, flower.leanProgress - dt / 8)
+          flower.mesh.quaternion.slerpQuaternions(
+            idQ,
+            flower.revealQuaternion,
+            flower.leanProgress,
+          )
+        }
+      }
+
+      if (this.footerRevealStarted && !this.footerWaveTriggered) {
+        this.footerWaveTriggered = true
+        for (const f of this.footerFlowers) {
+          ;(f.mesh.material as ShaderMaterial).uniforms.uWaveTime.value = time
+        }
+      }
+
       this.renderer.autoClear = false
       this.renderer.clearDepth()
       this.renderer.render(this.footerScene, this.footerCamera)

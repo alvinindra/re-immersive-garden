@@ -166,7 +166,8 @@ export class Gallery {
 
       el.addEventListener("pointerenter", () => {
         plane.hoverTarget = 1
-        this.onCursor(plane.title ? "View project" : null)
+        // real site cursor label on a project tile is "Discover" (uiStore.setCursor)
+        this.onCursor(plane.title ? "Discover" : null)
       })
       el.addEventListener("pointerleave", () => {
         plane.hoverTarget = 0
@@ -334,8 +335,9 @@ export class Gallery {
 
       const u = p.material.uniforms
       u.uPlaneAspect.value = r.width / r.height
-      // slow ease → smooth ~1s hover distortion (real site tweens uHover over 2s)
-      u.uHover.value = lerp(u.uHover.value, p.hoverTarget, 0.045)
+      // real site tweens uHover over a slow 2s gsap (duration:2). Use a frame-rate-
+      // independent exponential ease (~2s to settle) so hover swells/recedes softly.
+      u.uHover.value = lerp(u.uHover.value, p.hoverTarget, 1 - Math.exp(-dt * 1.6))
       u.uScrollVel.value = this.velNorm
       u.uDeform.value = this.deform
       u.uTime.value = (performance.now() - this.t0) / 1000

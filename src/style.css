@@ -157,12 +157,23 @@ html.lenis body {
 .mediaBlock {
   width: 100%;
 }
+/* standard site container = the real site's .gridWrapper.padding:
+   12 columns, fixed 16px gutters, capped + centred at 2088px, 16px side padding
+   (32px ≤768px). Replaces the old 13-col / vw-gutter guess. */
 .grid {
   display: grid;
-  grid-template-columns: repeat(13, 1fr);
-  column-gap: 0.7vw;
+  grid-template-columns: repeat(12, 1fr);
+  column-gap: 16px;
   align-items: center;
-  padding: 0 4vw;
+  width: 100%;
+  max-width: 2088px;
+  margin: 0 auto;
+  padding: 0 16px;
+}
+@media (max-width: 768px) {
+  .grid {
+    padding: 0 32px;
+  }
 }
 .media {
   position: relative;
@@ -176,23 +187,25 @@ html.lenis body {
   display: none; /* desktop shows project name via the cursor, not inline */
 }
 
-/* project = stacked media + legend rows, with the real site's vertical rhythm */
+/* project = stacked media + legend rows. Vertical rhythm copied verbatim from the
+   real site CSS: .projectBlock gap 11.111vw, project-to-project 27.777vw, legend
+   (textOnly) collapses with -11.111vw top/bottom. */
 .projectBlock {
   display: flex;
   flex-direction: column;
-  gap: 8vw;
+  gap: 11.1111111111vw;
   width: 100%;
 }
 .projectBlock + .projectBlock {
-  margin-top: 18vw;
+  margin-top: 27.7777777778vw;
 }
-/* first project after the showreel keeps a comfortable gap */
+/* first project after the showreel keeps the same project-to-project gap */
 #blocks > .mediaBlock + .projectBlock {
-  margin-top: 12vw;
+  margin-top: 27.7777777778vw;
 }
 .mediaBlock.textOnly {
-  margin-top: -5vw;
-  margin-bottom: -5vw;
+  margin-top: -11.1111111111vw;
+  margin-bottom: -11.1111111111vw;
 }
 /* showreel sits a screen below the hero */
 #blocks > .mediaBlock:first-child {
