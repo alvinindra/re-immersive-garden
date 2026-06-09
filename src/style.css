@@ -219,6 +219,9 @@ html.lenis body {
   line-height: 1.4;
   color: var(--ink);
   align-self: center;
+  /* real-site rhythm: push description below its media, tighter gap before next */
+  margin-top: 11.1111111111vw;
+  margin-bottom: 4.1666666667vw;
 }
 
 /* ---- centred text blocks ("Our approach", "Our mission") ------------------ */

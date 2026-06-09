@@ -86,6 +86,11 @@ export class Gallery {
   private rawVel = 0
   private t0 = performance.now()
 
+  // re-measure planes whenever document height shifts (font swap, HMR, late
+  // layout) so WebGL rects never drift from their DOM placeholders
+  private layoutObserver?: ResizeObserver
+  private remeasureQueued = false
+
   // reused scratch for save/restore around render-target passes
   private savedClear = new Color()
 
@@ -185,6 +190,20 @@ export class Gallery {
       })
     }
     this.measureLayout()
+
+    // any reflow that changes total page height (font swap, dev HMR, late media)
+    // moves placeholders below it — re-measure so the planes follow, debounced to
+    // one pass per frame.
+    const target = document.querySelector("#scroll-content") || document.documentElement
+    this.layoutObserver = new ResizeObserver(() => {
+      if (this.remeasureQueued) return
+      this.remeasureQueued = true
+      requestAnimationFrame(() => {
+        this.remeasureQueued = false
+        this.measureLayout()
+      })
+    })
+    this.layoutObserver.observe(target)
   }
 
   /** Cache each placeholder's document-space rect. Cheap reflow, done once on

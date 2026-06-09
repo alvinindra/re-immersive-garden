@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Learn — WebGL &amp; three.js in this project</title>
+    <meta
+      name="description"
+      content="A complete, beginner-friendly guide to how WebGL and three.js power the Immersive Garden rebuild: the render loop, shaders, the flowmap, the fluid sim, the relief, and the scrolling gallery."
+    />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230b0d0f'/%3E%3Ctext x='16' y='22' font-family='Helvetica,Arial,sans-serif' font-size='15' font-weight='700' fill='%235ad1d1' text-anchor='middle'%3EIG%3C/text%3E%3C/svg%3E"
+    />
+    <link rel="stylesheet" href="/src/learn/learn.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#content">Skip to content</a>
+
+    <div class="layout">
+      <!-- sidebar: brand + table of contents (built from headings) -->
+      <aside class="sidebar" id="sidebar">
+        <a class="brand" href="/">
+          <span class="brand__mark" aria-hidden="true">IG</span>
+          <span class="brand__text">
+            <span class="brand__title">Learn</span>
+            <span class="brand__sub">WebGL &amp; three.js</span>
+          </span>
+        </a>
+        <nav class="toc" id="toc" aria-label="Table of contents"></nav>
+      </aside>
+
+      <!-- mobile top bar -->
+      <header class="topbar" id="topbar">
+        <button class="topbar__menu" id="menuToggle" aria-label="Toggle table of contents" aria-expanded="false">
+          <span></span><span></span><span></span>
+        </button>
+        <span class="topbar__title">Learn — WebGL &amp; three.js</span>
+        <a class="topbar__home" href="/" aria-label="Back to the experience">Home</a>
+      </header>
+
+      <!-- the rendered markdown lands here -->
+      <main class="content" id="content"></main>
+    </div>
+
+    <button class="totop" id="toTop" aria-label="Back to top" hidden></button>
+
+    <script type="module" src="/src/learn/learn.ts"></script>
+  </body>
+</html>
