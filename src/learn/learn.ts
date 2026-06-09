@@ -75,6 +75,67 @@ const spy = new IntersectionObserver(
 )
 for (const t of targets) spy.observe(t)
 
+// ---- "Tandai Sudah Selesai": per-section completion -------------------------
+const STORAGE_KEY = "ig-learn-done"
+
+function loadDone(): Set<string> {
+  try {
+    const arr = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "[]")
+    return new Set(Array.isArray(arr) ? (arr as string[]) : [])
+  } catch {
+    return new Set()
+  }
+}
+function saveDone(set: Set<string>) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify([...set]))
+  } catch {
+    /* private mode / quota — degrade to in-memory only */
+  }
+}
+
+const done = loadDone()
+// the major sections are the h2 headings; subsections (h3) are not markable
+const sectionIds = headings.filter((h) => h.level === 2).map((h) => h.id)
+const total = sectionIds.length
+
+// progress label in the sidebar, just above the table of contents
+const progressEl = document.createElement("p")
+progressEl.className = "toc__progress"
+sidebar.insertBefore(progressEl, tocEl)
+const updateProgress = () => {
+  const count = sectionIds.reduce((n, id) => n + (done.has(id) ? 1 : 0), 0)
+  progressEl.textContent = `${count}/${total} selesai`
+}
+
+const paintButton = (btn: HTMLButtonElement, id: string) => {
+  const isDone = done.has(id)
+  btn.classList.toggle("is-done", isDone)
+  btn.setAttribute("aria-pressed", String(isDone))
+  btn.textContent = isDone ? "✓ Sudah Selesai" : "Tandai Sudah Selesai"
+  linkById.get(id)?.classList.toggle("is-done", isDone)
+}
+
+const toggleDone = (id: string, btn: HTMLButtonElement) => {
+  done.has(id) ? done.delete(id) : done.add(id)
+  saveDone(done)
+  paintButton(btn, id)
+  updateProgress()
+}
+
+for (const id of sectionIds) {
+  const heading = document.getElementById(id)
+  if (!heading) continue
+  const btn = document.createElement("button")
+  btn.className = "done-btn"
+  btn.type = "button"
+  btn.dataset.section = id
+  btn.addEventListener("click", () => toggleDone(id, btn))
+  paintButton(btn, id)
+  heading.after(btn)
+}
+updateProgress()
+
 // smooth-scroll TOC clicks + close the mobile drawer
 for (const l of links) {
   l.addEventListener("click", (e) => {
