@@ -80,8 +80,8 @@ export class FooterScene {
 
     const [lutData, noise, data] = await Promise.all([
       loadLut("/webgl/footer/lut.3dl"),
-      new Promise<Texture>((res) => {
-        const t = new TextureLoader().load("/webgl/global/noises/rgb-noise.jpg", res)
+      new Promise<Texture>((res, rej) => {
+        const t = new TextureLoader().load("/webgl/global/noises/rgb-noise.jpg", res, undefined, rej)
         t.wrapS = t.wrapT = RepeatWrapping
       }),
       new Promise<{ scene: Group; cameras: PerspectiveCamera[] }>((res, rej) =>
