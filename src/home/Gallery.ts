@@ -28,14 +28,21 @@ import type { ScrollState } from "../scroll/SmoothScroll"
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v))
 
-/** max videos decoding at once — keeps Retina FPS smooth */
 const MAX_VIDEOS = 3
 
 type Kind = "image" | "video" | "glb"
 
+interface ScreenRect {
+  top: number
+  bottom: number
+  left: number
+  width: number
+  height: number
+}
+
 interface GlbScene {
-  root: Scene // wrapper we render (carries the environment)
-  model: Object3D // what we rotate
+  root: Scene
+  model: Object3D
   camera: PerspectiveCamera
   rt: WebGLRenderTarget
   tilt: number
@@ -56,21 +63,13 @@ interface MediaPlane {
   videoTex?: VideoTexture
   playing?: boolean
   glb?: GlbScene
-  // cached layout (document-space) — avoids getBoundingClientRect every frame
   docTop: number
   left: number
   width: number
   height: number
+  videoDist: number
 }
 
-/**
- * Renders every `[data-media]` DOM placeholder as a WebGL plane synced to its rect,
- * matching the real homepage gallery:
- *   - image  → KTX2 still
- *   - video  → muted/loop VideoTexture, played only while in view (paused otherwise)
- *   - glb    → the model rendered to a render target each frame, tilting with scroll
- * Drawn as a depth-cleared second pass in the relief's renderer.
- */
 export class Gallery {
   readonly scene = new Scene()
   readonly camera: OrthographicCamera
@@ -86,14 +85,14 @@ export class Gallery {
   private rawVel = 0
   private t0 = performance.now()
 
-  // re-measure planes whenever document height shifts (font swap, HMR, late
-  // layout) so WebGL rects never drift from their DOM placeholders
   private layoutObserver?: ResizeObserver
   private remeasureQueued = false
 
-  // reused scratch for save/restore around render-target passes
-  private savedClear = new Color()
+  // per-frame scratch — consumed synchronously inside update(), never retained
+  private rect: ScreenRect = { top: 0, bottom: 0, left: 0, width: 0, height: 0 }
+  private videoCandidates: MediaPlane[] = []
 
+  private savedClear = new Color()
   private onCursor: (text: string | null) => void
 
   constructor(renderer: WebGLRenderer, onCursor: (text: string | null) => void) {
@@ -115,7 +114,6 @@ export class Gallery {
     this.gltf.setDRACOLoader(draco)
     this.gltf.setKTX2Loader(this.ktx2)
 
-    // studio environment so the metallic GLB models read as gold, not black
     const pmrem = new PMREMGenerator(this.renderer)
     this.envMap = pmrem.fromScene(new RoomEnvironment(), 0.04).texture
 
@@ -166,12 +164,12 @@ export class Gallery {
         left: 0,
         width: 0,
         height: 0,
+        videoDist: 0,
       }
       this.planes.push(plane)
 
       el.addEventListener("pointerenter", () => {
         plane.hoverTarget = 1
-        // real site cursor label on a project tile is "Discover" (uiStore.setCursor)
         this.onCursor(plane.title ? "Discover" : null)
       })
       el.addEventListener("pointerleave", () => {
@@ -191,9 +189,6 @@ export class Gallery {
     }
     this.measureLayout()
 
-    // any reflow that changes total page height (font swap, dev HMR, late media)
-    // moves placeholders below it — re-measure so the planes follow, debounced to
-    // one pass per frame.
     const target = document.querySelector("#scroll-content") || document.documentElement
     this.layoutObserver = new ResizeObserver(() => {
       if (this.remeasureQueued) return
@@ -206,9 +201,6 @@ export class Gallery {
     this.layoutObserver.observe(target)
   }
 
-  /** Cache each placeholder's document-space rect. Cheap reflow, done once on
-   *  build + resize instead of every frame (getBoundingClientRect-per-frame was a
-   *  major scroll-lag source). Per-frame we only read window.scrollY. */
   measureLayout() {
     const scrollY = window.scrollY
     for (const p of this.planes) {
@@ -220,7 +212,6 @@ export class Gallery {
     }
   }
 
-  // ---- per-kind loaders ------------------------------------------------------
   private load(plane: MediaPlane) {
     plane.requested = true
     const src = plane.el.getAttribute("data-media")!
@@ -281,9 +272,8 @@ export class Gallery {
 
       const root = new Scene()
       root.environment = this.envMap
-      root.environmentIntensity = 1.8 // lift the metallic models out of shadow
+      root.environmentIntensity = 1.8
 
-      // reuse the GLB's own framed camera (real site does), else a fallback
       let camera = data.cameras[0] as PerspectiveCamera | undefined
       const aspect = plane.material.uniforms.uTextureAspect.value as number
       if (camera && camera.isPerspectiveCamera) {
@@ -305,7 +295,7 @@ export class Gallery {
 
       const rt = new WebGLRenderTarget(Math.round(aspect * 512), 512, {
         depthBuffer: true,
-        samples: 4, // MSAA for clean model edges
+        samples: 4,
       })
       plane.glb = { root, model, camera, rt, tilt: 0 }
       plane.material.uniforms.uTexture.value = rt.texture
@@ -322,66 +312,96 @@ export class Gallery {
     const w = window.innerWidth
     const h = window.innerHeight
 
+    this.updateScrollPhysics()
+
+    const scrollY = window.scrollY
+    const loadMargin = h * 1.4
+    const time = (performance.now() - this.t0) / 1000
+    const candidates = this.videoCandidates
+    candidates.length = 0
+    const r = this.rect
+
+    for (const p of this.planes) {
+      if (p.width === 0) continue
+
+      r.top = p.docTop - scrollY
+      r.bottom = r.top + p.height
+      r.left = p.left
+      r.width = p.width
+      r.height = p.height
+      const onScreen = r.bottom > -loadMargin && r.top < h + loadMargin
+
+      if (!onScreen) {
+        this.hidePlane(p)
+        continue
+      }
+
+      if (!p.requested) this.load(p)
+
+      this.updatePlaneLayout(p, r, w, h)
+      this.updatePlaneUniforms(p, r, dt, h, time)
+
+      if (p.kind === "video" && p.video && p.loaded) {
+        p.videoDist = Math.abs(r.top + r.height / 2 - h / 2)
+        candidates.push(p)
+      }
+
+      if (p.kind === "glb" && p.glb) {
+        const intersecting = r.top < h && r.bottom > 0
+        if (intersecting || (p.material.uniforms.uOpacity.value as number) > 0.01) {
+          const scrollNorm = clamp((h / 2 - (r.top + r.height / 2)) / (h / 2), -1, 1)
+          this.renderGlb(p.glb, scrollNorm, dt)
+        } else {
+          // keep spin advancing off-screen so re-entry doesn't snap
+          p.glb.model.rotation.y += dt * 0.3
+        }
+      }
+    }
+
+    this.manageVideoDecodes(candidates)
+  }
+
+  private updateScrollPhysics() {
     const targetVel = clamp(this.rawVel / 2600, -1, 1)
     const targetDeform = Math.min(1, Math.abs(this.rawVel) / 2200)
     this.velNorm = lerp(this.velNorm, targetVel, 0.12)
     this.deform = lerp(this.deform, targetDeform, 0.1)
     this.rawVel *= 0.9
+  }
 
-    const loadMargin = h * 1.4
-    const scrollY = window.scrollY
-    const videoCandidates: Array<{ p: MediaPlane; dist: number }> = []
-    for (const p of this.planes) {
-      if (p.width === 0) continue
-      const top = p.docTop - scrollY
-      const r = { top, bottom: top + p.height, left: p.left, width: p.width, height: p.height }
-      const onScreen = r.bottom > -loadMargin && r.top < h + loadMargin
-      if (!onScreen) {
-        p.mesh.visible = false
-        if (p.playing && p.video) {
-          p.video.pause()
-          p.playing = false
-        }
-        continue
-      }
-      if (!p.requested) this.load(p)
-
-      p.mesh.visible = true
-      const cx = r.left + r.width / 2 - w / 2
-      const cy = -(r.top + r.height / 2) + h / 2
-      p.mesh.position.set(cx, cy, 0)
-      p.mesh.scale.set(r.width, r.height, 1)
-
-      const u = p.material.uniforms
-      u.uPlaneAspect.value = r.width / r.height
-      // real site tweens uHover over a slow 2s gsap (duration:2). Use a frame-rate-
-      // independent exponential ease (~2s to settle) so hover swells/recedes softly.
-      u.uHover.value = lerp(u.uHover.value, p.hoverTarget, 1 - Math.exp(-dt * 1.6))
-      u.uScrollVel.value = this.velNorm
-      u.uDeform.value = this.deform
-      u.uTime.value = (performance.now() - this.t0) / 1000
-
-      const inView = r.top < h * 0.92 && r.bottom > h * 0.08
-      if (inView && p.loaded) p.opacityTarget = 1
-      u.uOpacity.value = lerp(u.uOpacity.value, p.opacityTarget, 0.08)
-
-      // queue in-view videos; only the nearest few actually decode (see below)
-      if (p.kind === "video" && p.video && p.loaded) {
-        videoCandidates.push({ p, dist: Math.abs(r.top + r.height / 2 - h / 2) })
-      }
-
-      // render glb models to their target, tilting with scroll position
-      if (p.kind === "glb" && p.glb) {
-        const e = clamp((h / 2 - (r.top + r.height / 2)) / (h / 2), -1, 1)
-        this.renderGlb(p.glb, e, dt)
-      }
+  private hidePlane(p: MediaPlane) {
+    p.mesh.visible = false
+    if (p.playing && p.video) {
+      p.video.pause()
+      p.playing = false
     }
+  }
 
-    // cap concurrent video decode (Retina + many mp4s was the lag): play the
-    // MAX_VIDEOS nearest the viewport centre, pause the rest.
-    videoCandidates.sort((a, b) => a.dist - b.dist)
-    for (let i = 0; i < videoCandidates.length; i++) {
-      const p = videoCandidates[i].p
+  private updatePlaneLayout(p: MediaPlane, r: ScreenRect, w: number, h: number) {
+    p.mesh.visible = true
+    const cx = r.left + r.width / 2 - w / 2
+    const cy = -(r.top + r.height / 2) + h / 2
+    p.mesh.position.set(cx, cy, 0)
+    p.mesh.scale.set(r.width, r.height, 1)
+  }
+
+  private updatePlaneUniforms(p: MediaPlane, r: ScreenRect, dt: number, h: number, time: number) {
+    const u = p.material.uniforms
+    u.uPlaneAspect.value = r.width / r.height
+    u.uHover.value = lerp(u.uHover.value, p.hoverTarget, 1 - Math.exp(-dt * 1.6))
+    u.uScrollVel.value = this.velNorm
+    u.uDeform.value = this.deform
+    u.uTime.value = time
+
+    const inView = r.top < h * 0.92 && r.bottom > h * 0.08
+    if (inView && p.loaded) p.opacityTarget = 1
+    u.uOpacity.value = lerp(u.uOpacity.value, p.opacityTarget, 0.08)
+  }
+
+  private manageVideoDecodes(candidates: MediaPlane[]) {
+    candidates.sort((a, b) => a.videoDist - b.videoDist)
+    for (let i = 0; i < candidates.length; i++) {
+      const p = candidates[i]
       if (i < MAX_VIDEOS) {
         if (!p.playing) p.video!.play().then(() => (p.playing = true)).catch(() => {})
         if (p.videoTex) p.videoTex.needsUpdate = true
@@ -392,10 +412,9 @@ export class Gallery {
     }
   }
 
-  /** Render one GLB sub-scene to its target; rotation.x tracks scroll (×0.45). */
   private renderGlb(g: GlbScene, scrollNorm: number, dt: number) {
     g.model.rotation.x = scrollNorm * 0.45
-    g.model.rotation.y += dt * 0.3 // slow idle spin
+    g.model.rotation.y += dt * 0.3
 
     const ren = this.renderer
     ren.getClearColor(this.savedClear)
@@ -403,7 +422,7 @@ export class Gallery {
     const savedAutoClear = ren.autoClear
     const savedCS = ren.outputColorSpace
 
-    ren.outputColorSpace = SRGBColorSpace // so the RT stores display-ready colour
+    ren.outputColorSpace = SRGBColorSpace
     ren.setClearColor(0x000000, 0)
     ren.autoClear = true
     ren.setRenderTarget(g.rt)

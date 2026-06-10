@@ -13,8 +13,8 @@ import {
   WebGLRenderer,
   WebGLRenderTarget,
 } from "three";
-import vertexShader from "./shaders/flowmap.vert.glsl";
-import fragmentShader from "./shaders/flowmap.frag.glsl";
+import vertexShader from "../shaders/flowmap.vert.glsl";
+import fragmentShader from "../shaders/flowmap.frag.glsl";
 
 export interface FlowmapOptions {
   /** Render-target size (longest side). The stamp lives in UV space, so this
