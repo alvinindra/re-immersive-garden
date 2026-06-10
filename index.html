@@ -5,6 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Immersive Garden — Reverse Engineered</title>
     <link rel="stylesheet" href="/src/style.css" />
+    <!-- critical asset chain: let the browser fetch these at parse time instead of
+         after the module graph evaluates (footer GLB intentionally not preloaded —
+         below-fold, shouldn't compete for bandwidth) -->
+    <link rel="preload" href="/webgl/home/reliefs_high_compressed.glb" as="fetch" crossorigin />
+    <link rel="preload" href="/draco/draco_decoder.wasm" as="fetch" crossorigin />
+    <link rel="preload" href="/draco/draco_wasm_wrapper.js" as="script" />
+    <link rel="preload" href="/webgl/libs/basis/basis_transcoder.wasm" as="fetch" crossorigin />
+    <link rel="preload" href="/plaster.jpg" as="image" />
   </head>
   <body>
     <!-- fixed full-screen WebGL: relief background + scrolling media gallery (2nd pass) -->
