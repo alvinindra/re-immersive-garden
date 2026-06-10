@@ -43,3 +43,4 @@ Thumbs.db
 # Downloaded project videos (run scripts/fetch-videos.sh)
 public/videos/
 .claude/
+.vercel

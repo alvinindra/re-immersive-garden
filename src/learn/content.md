@@ -36,7 +36,7 @@ Itulah seluruh permukaan gambar. Di `src/main.ts`, canvas ini diserahkan ke thre
 
 ```ts
 const canvas = document.querySelector<HTMLCanvasElement>("#webgl")
-const relief = new Relief(canvas)
+const app = new WebGLApp(canvas)
 ```
 
 Semua relief, galeri, dan footer digambar di **satu canvas yang sama** yang menutupi layar penuh (`position: fixed; inset: 0`). DOM (teks, judul project) discroll di atasnya.
@@ -69,7 +69,7 @@ Dua kotak bertuliskan "shader" itu adalah kode yang **kamu** tulis dan dijalanka
 
 Dijalankan **sekali per vertex** (titik sudut). Tugas utamanya: mengubah posisi 3D sebuah titik menjadi posisi di layar. Output wajibnya adalah variabel built-in `gl_Position`.
 
-Contoh paling sederhana di project ini, dari `src/relief/shaders/flowmap.vert.glsl`:
+Contoh paling sederhana di project ini, dari `src/webgl/shaders/flowmap.vert.glsl`:
 
 ```glsl
 varying vec2 vUv;
@@ -140,7 +140,7 @@ three.js menyediakan matriks-matriks ini sebagai uniform otomatis di setiap `Sha
 
 ### Trik penting di project ini: posisi layar dari posisi 3D
 
-Relief perlu tahu "di mana sebuah titik 3D muncul di layar" untuk membaca flowmap (jejak kursor) di posisi yang benar. Lihat `src/relief/shaders/relief.vert.glsl`:
+Relief perlu tahu "di mana sebuah titik 3D muncul di layar" untuk membaca flowmap (jejak kursor) di posisi yang benar. Lihat `src/webgl/shaders/relief.vert.glsl`:
 
 ```glsl
 vec4 ndc = projectionMatrix * modelViewMatrix * pos;
@@ -182,7 +182,7 @@ Galeri memakai ini untuk merender model GLB ke texture (`src/home/Gallery.ts`), 
 Sebuah shader tidak bisa membaca dan menulis texture yang sama secara bersamaan. Tapi efek seperti jejak yang memudar **butuh** frame sebelumnya: "ambil keadaan kemarin, redupkan sedikit, tambah input baru". Solusinya: **dua** render target yang bergantian peran tiap frame — satu dibaca (`read`), satu ditulis (`write`), lalu ditukar. Inilah **ping-pong**.
 
 ```ts
-// pola ping-pong (disederhanakan dari src/relief/Flowmap.ts)
+// pola ping-pong (disederhanakan dari src/webgl/core/Flowmap.ts)
 this.material.uniforms.tMap.value = this.read.texture  // baca yang lama
 renderer.setRenderTarget(this.write)                    // tulis ke yang baru
 renderer.render(this.scene, this.camera)
@@ -242,9 +242,9 @@ const mesh = new Mesh(geometry, material)
 three.js punya material siap pakai (`MeshStandardMaterial`, dll.) dengan model pencahayaan PBR. Tapi untuk efek kustom, project ini menulis shader sendiri lewat:
 
 - **`ShaderMaterial`** — kamu beri vertex + fragment shader sendiri, tapi three.js tetap menyuntikkan uniform & attribute standar (`projectionMatrix`, `position`, `uv`, dll.). Dipakai untuk relief, footer, dan galeri.
-- **`RawShaderMaterial`** — tidak ada suntikan otomatis sama sekali; kamu deklarasikan semuanya. Dipakai oleh fluid sim (`src/relief/FluidSimulation.ts`) karena pass-nya sangat low-level dan butuh kontrol penuh.
+- **`RawShaderMaterial`** — tidak ada suntikan otomatis sama sekali; kamu deklarasikan semuanya. Dipakai oleh fluid sim (`src/webgl/core/FluidSimulation.ts`) karena pass-nya sangat low-level dan butuh kontrol penuh.
 
-Contoh dari `src/relief/Relief.ts`:
+Contoh dari `src/webgl/WebGLApp.ts`:
 
 ```ts
 const material = new ShaderMaterial({
@@ -324,25 +324,25 @@ Sekarang gambaran besarnya. Semua dijahit di `src/main.ts`. Alurnya:
 ### main.ts: kabel utamanya
 
 ```ts
-const relief = new Relief(canvas)
+const app = new WebGLApp(canvas)
 const scroll = new SmoothScroll()
-const gallery = new Gallery(relief.renderer, setCursorLabel)
+const gallery = new Gallery(app.renderer, setCursorLabel)
 const scrollCursor = new ScrollCursor()
 
-relief.setOverlay(gallery)  // galeri digambar sebagai pass kedua DI DALAM relief
+app.setOverlay(gallery)  // galeri digambar sebagai pass kedua DI DALAM relief
 
 scroll.onScroll((s) => {
   gallery.setScroll(s)
-  relief.setScroll(s.scrollPct, s.speed) // pan relief + cross-fade footer
+  app.setScroll(s.scrollPct, s.speed) // pan relief + cross-fade footer
   scrollCursor.onScroll(s)
 })
 ```
 
-Perhatikan: galeri **berbagi renderer yang sama** dengan relief (`relief.renderer`). Tidak ada dua canvas atau dua konteks WebGL — itu boros. Sebagai gantinya, satu renderer menggambar relief dulu, lalu galeri di atasnya.
+Perhatikan: galeri **berbagi renderer yang sama** dengan relief (`app.renderer`). Tidak ada dua canvas atau dua konteks WebGL — itu boros. Sebagai gantinya, satu renderer menggambar relief dulu, lalu galeri di atasnya.
 
 ### Multi-pass dalam satu frame
 
-Di `Relief.update()` (`src/relief/Relief.ts`), satu frame sebenarnya beberapa "pass" yang ditumpuk:
+Di `WebGLApp.update()` (`src/webgl/WebGLApp.ts`), satu frame sebenarnya beberapa "pass" yang ditumpuk:
 
 ```ts
 this.flowmap.update(time, 0)   // pass: tulis flowmap ke render target
@@ -374,7 +374,7 @@ Kuncinya `autoClear = false` + `clearDepth()`. Normalnya `renderer.render` mengh
 
 ## 7. Deep dive: Trail effect — jejak yang menyingkap relief
 
-Ini efek tanda tangan situs ini: gerakkan mouse di atas bidang plaster putih yang rata, dan di sepanjang jejak kursor permukaan **tersingkap** jadi relief taman terpahat, lalu perlahan kembali rata. Bagian ini membedahnya pelan-pelan, dari intuisi sampai baris shader. File: `src/relief/Flowmap.ts` + `src/relief/shaders/flowmap.*.glsl`.
+Ini efek tanda tangan situs ini: gerakkan mouse di atas bidang plaster putih yang rata, dan di sepanjang jejak kursor permukaan **tersingkap** jadi relief taman terpahat, lalu perlahan kembali rata. Bagian ini membedahnya pelan-pelan, dari intuisi sampai baris shader. File: `src/webgl/core/Flowmap.ts` + `src/webgl/shaders/flowmap.*.glsl`.
 
 ### Bukan sekadar gradient di kursor
 
@@ -463,7 +463,7 @@ Flowmap menyimpan 4 angka per piksel (`rgba`):
 
 ### Shader-nya
 
-Dari `src/relief/shaders/flowmap.frag.glsl`:
+Dari `src/webgl/shaders/flowmap.frag.glsl`:
 
 ```glsl
 void main() {
@@ -513,12 +513,12 @@ Bacanya: kalau di posisi layar titik ini flowmap terang (`extrude` mendekati 1),
 
 ### Easing & lerp: rahasia rasa "lembut"
 
-Kalau cap mengikuti posisi mouse mentah, jejak terasa kaku dan patah. Project ini menghaluskannya dengan [[lerp|Linear interpolation: a + (b - a) × t; menggerakkan nilai sebagian jalan menuju target tiap frame]] di JavaScript sebelum dikirim ke shader (`Relief.update`):
+Kalau cap mengikuti posisi mouse mentah, jejak terasa kaku dan patah. Project ini menghaluskannya dengan [[lerp|Linear interpolation: a + (b - a) × t; menggerakkan nilai sebagian jalan menuju target tiap frame]] di JavaScript sebelum dikirim ke shader (`WebGLApp.update`):
 
 ```ts
 this.pointer.update()
 // 0.4 = "kejar 40% jarak ke target tiap frame" -> halus, sedikit tertinggal
-this.flowmap.mouse.lerp(this.pointer.normalFlip, CONFIG.flowmap.mouseEase) // 0.4
+this.flowmap.mouse.lerp(this.pointer.normalFlip, HOME_CONFIG.flowmap.mouseEase) // 0.4
 const vmag = this.pointer.velocity.length()
 this.flowmap.velocity.lerp(this.pointer.velocity, vmag ? 0.1 : 0.04)
 this.flowmap.update(time, 0)
@@ -528,11 +528,11 @@ this.flowmap.update(time, 0)
 
 ### Sapuan otomatis saat diam
 
-Saat kursor diam, relief tetap hidup karena ada sapuan otomatis. `updateSweep()` di `Relief.ts` menggerakkan kursor kedua (`mouse2`) di flowmap menyusuri jalur acak halus, jadi cap tetap muncul walau kamu tidak menyentuh mouse. Itu sebabnya bidang plaster tidak pernah benar-benar diam.
+Saat kursor diam, relief tetap hidup karena ada sapuan otomatis. `updateSweep()` di `WebGLApp.ts` menggerakkan kursor kedua (`mouse2`) di flowmap menyusuri jalur acak halus, jadi cap tetap muncul walau kamu tidak menyentuh mouse. Itu sebabnya bidang plaster tidak pernah benar-benar diam.
 
 ### Tuning: ubah satu angka, lihat efeknya
 
-Semua "rasa" trail diatur beberapa konstanta di `CONFIG.flowmap` (`Relief.ts`). Coba ubah lalu refresh:
+Semua "rasa" trail diatur beberapa konstanta di `HOME_CONFIG.flowmap` (`HomeScene.ts`). Coba ubah lalu refresh:
 
 | Konstanta | Nilai situs | Dinaikkan | Diturunkan |
 |-----------|-------------|-----------|------------|
@@ -543,7 +543,7 @@ Semua "rasa" trail diatur beberapa konstanta di `CONFIG.flowmap` (`Relief.ts`). 
 
 ### Coba sendiri
 
-Cara tercepat memahami: buka `src/relief/shaders/flowmap.frag.glsl`, ganti `data *= dissipation;` jadi `data *= 0.8;` lalu refresh — jejak akan hilang sangat cepat. Atau ubah `smoothstep(uFalloff, 0.0, ...)` jadi `step(uFalloff, ...)` untuk melihat cap bertepi keras tanpa pelembutan. Eksperimen kecil seperti ini jauh lebih melekat daripada teori.
+Cara tercepat memahami: buka `src/webgl/shaders/flowmap.frag.glsl`, ganti `data *= dissipation;` jadi `data *= 0.8;` lalu refresh — jejak akan hilang sangat cepat. Atau ubah `smoothstep(uFalloff, 0.0, ...)` jadi `step(uFalloff, ...)` untuk melihat cap bertepi keras tanpa pelembutan. Eksperimen kecil seperti ini jauh lebih melekat daripada teori.
 
 ### Catatan istilah (bagian ini)
 
@@ -569,7 +569,7 @@ Ringkasan istilah yang muncul di atas (arahkan kursor ke kata bergaris putus-put
 
 ## 8. Deep dive: Fluid simulation (jejak warna-warni)
 
-Jejak iridescent (pelangi) yang mengikuti kursor bukan sekadar warna — itu **simulasi cairan Navier-Stokes** sungguhan yang jalan di GPU. File: `src/relief/FluidSimulation.ts`. Ini bagian paling rumit secara matematika; tujuannya di sini adalah kamu paham **alurnya**, bukan menurunkan rumusnya.
+Jejak iridescent (pelangi) yang mengikuti kursor bukan sekadar warna — itu **simulasi cairan Navier-Stokes** sungguhan yang jalan di GPU. File: `src/webgl/core/FluidSimulation.ts`. Ini bagian paling rumit secara matematika; tujuannya di sini adalah kamu paham **alurnya**, bukan menurunkan rumusnya.
 
 ### Apa yang disimulasikan
 
@@ -634,7 +634,7 @@ private pushSplat(px, py) {
 
 ## 9. Deep dive: Relief shader
 
-Inilah bintang utamanya. Relief adalah model `.glb` (panel taman bertile) yang permukaannya **terangkat** mengikuti flowmap, dan **diwarnai** lewat blend rumit antara dua texture baked. File: `src/relief/shaders/relief.vert.glsl` + `relief.frag.glsl`, dikonfigurasi di `src/relief/Relief.ts`.
+Inilah bintang utamanya. Relief adalah model `.glb` (panel taman bertile) yang permukaannya **terangkat** mengikuti flowmap, dan **diwarnai** lewat blend rumit antara dua texture baked. File: `src/webgl/shaders/relief.vert.glsl` + `relief.frag.glsl`, dikonfigurasi di `src/webgl/WebGLApp.ts`.
 
 ### Vertex: mengekstrusi permukaan
 
@@ -685,7 +685,7 @@ float fresnelFactor = abs(dot(normal, vec3(0.0, 0.0, 1.0)));
 
 ### Konfigurasi dari situs asli
 
-Semua angka ajaib (dissipation 0.953, fov 30, fresnel sharpness 35, dst.) bukan tebakan — diambil verbatim dari bundle situs aslinya, terkumpul di objek `CONFIG` (`Relief.ts`) dan `src/relief/shaders/config.glsl`. Ini contoh bagus bahwa "look" sebuah efek seringkali soal **tuning konstanta**, bukan algoritma yang berbeda.
+Semua angka ajaib (dissipation 0.953, fov 30, fresnel sharpness 35, dst.) bukan tebakan — diambil verbatim dari bundle situs aslinya, terkumpul di objek `HOME_CONFIG` (`HomeScene.ts`) dan `src/webgl/shaders/config.glsl`. Ini contoh bagus bahwa "look" sebuah efek seringkali soal **tuning konstanta**, bukan algoritma yang berbeda.
 
 ---
 
@@ -792,7 +792,7 @@ this.state.speed = Math.abs(this.lenis.velocity / 1000) * 0.1
 this.state.scrollPct = this.lenis.scroll / this.lenis.limit  // 0..1
 ```
 
-`scrollPct` (0 di atas, 1 di bawah) menggerakkan banyak hal: relief mem-pan vertikal mengikuti scroll, dan footer cross-fade masuk di 10% scroll terakhir (lihat `Relief.setScroll`). Lenis digerakkan dari loop utama yang sama: `scroll.raf(t)`.
+`scrollPct` (0 di atas, 1 di bawah) menggerakkan banyak hal: relief mem-pan vertikal mengikuti scroll, dan footer cross-fade masuk di 10% scroll terakhir (lihat `WebGLApp.setScroll`). Lenis digerakkan dari loop utama yang sama: `scroll.raf(t)`.
 
 > [!NOTE]
 > Satu RAF loop menggerakkan SEMUANYA — Lenis, flowmap, fluid, relief, galeri, scroll cursor. Ini penting: kalau tiap sistem punya loop sendiri, mereka bisa tidak sinkron dan boros. Satu loop = satu sumber waktu, satu titik render.
@@ -801,7 +801,7 @@ this.state.scrollPct = this.lenis.scroll / this.lenis.limit  // 0..1
 
 ## 12. Deep dive: Footer relief (angin, cahaya, LUT)
 
-Di dasar halaman, relief abu-abu cross-fade ke **taman bunga gelap** yang bereaksi pada angin dan cahaya kursor. Ini scene terpisah dengan teknik sendiri. File: `src/relief/Relief.ts` (`loadFooter`), `FooterWind.ts`, `LutLoader.ts`, `shaders/footer.*.glsl`.
+Di dasar halaman, relief abu-abu cross-fade ke **taman bunga gelap** yang bereaksi pada angin dan cahaya kursor. Ini scene terpisah dengan teknik sendiri. File: `src/webgl/WebGLApp.ts` (`loadFooter`), `FooterWind.ts`, `LutLoader.ts`, `shaders/footer.*.glsl`.
 
 ### Scene & kamera sendiri
 
@@ -809,7 +809,7 @@ Footer punya `Scene` dan `PerspectiveCamera` terpisah (kamera diambil dari yang 
 
 ### Angin: spring fisika di CPU
 
-Tiap bunga bergoyang dengan kombinasi: **angin global** (fungsi noise pseudo-acak) dan **reaksi kursor** (spring fisika). Lihat `src/relief/FooterWind.ts`:
+Tiap bunga bergoyang dengan kombinasi: **angin global** (fungsi noise pseudo-acak) dan **reaksi kursor** (spring fisika). Lihat `src/webgl/scenes/FooterWind.ts`:
 
 ```ts
 export class Spring {
@@ -841,11 +841,11 @@ vec3 reflection = normalize(reflect(-cursorDir, surfaceNormal));
 float spec = pow(max(0.0, dot(eyeDir, reflection)), SHININESS);
 ```
 
-Posisi kursor di dunia 3D didapat lewat **raycasting**: sebuah `Raycaster` menembak dari kamera lewat posisi mouse ke sebuah mesh "proxy" tak terlihat, titik tabraknya jadi posisi cahaya (`updateFooterCursor` di `Relief.ts`).
+Posisi kursor di dunia 3D didapat lewat **raycasting**: sebuah `Raycaster` menembak dari kamera lewat posisi mouse ke sebuah mesh "proxy" tak terlihat, titik tabraknya jadi posisi cahaya (`updateCursor` di `FooterScene.ts`).
 
 ### LUT color grading
 
-Warna akhir footer dilewatkan sebuah **LUT 3D** (lookup table warna, format `.3dl`) untuk grading sinematik. `src/relief/LutLoader.ts` mem-parse file teks `.3dl` jadi `Data3DTexture`, dan shader memetakan tiap warna lewatnya:
+Warna akhir footer dilewatkan sebuah **LUT 3D** (lookup table warna, format `.3dl`) untuk grading sinematik. `src/webgl/core/LutLoader.ts` mem-parse file teks `.3dl` jadi `Data3DTexture`, dan shader memetakan tiap warna lewatnya:
 
 ```glsl
 vec3 uvw = vec3(halfPixelWidth) + color * (1.0 - pixelWidth);
@@ -918,12 +918,12 @@ Struktur kode yang relevan:
 | File | Tanggung jawab |
 |------|----------------|
 | `src/main.ts` | menjahit scroll -> relief -> galeri -> scroll cursor; satu RAF loop |
-| `src/relief/Relief.ts` | scene utama, kamera, load GLB, pointer, sweep, multi-pass, fade footer |
-| `src/relief/Flowmap.ts` | flowmap velocity ping-pong (jejak kursor) |
-| `src/relief/FluidSimulation.ts` | simulasi Navier-Stokes (jejak warna) |
-| `src/relief/FooterWind.ts` | spring angin + reaksi kursor bunga footer |
-| `src/relief/LutLoader.ts` | parse `.3dl` jadi LUT 3D |
-| `src/relief/shaders/*.glsl` | shader relief, flowmap, footer + `config.glsl` |
+| `src/webgl/WebGLApp.ts` | scene utama, kamera, load GLB, pointer, sweep, multi-pass, fade footer |
+| `src/webgl/core/Flowmap.ts` | flowmap velocity ping-pong (jejak kursor) |
+| `src/webgl/core/FluidSimulation.ts` | simulasi Navier-Stokes (jejak warna) |
+| `src/webgl/scenes/FooterWind.ts` | spring angin + reaksi kursor bunga footer |
+| `src/webgl/core/LutLoader.ts` | parse `.3dl` jadi LUT 3D |
+| `src/webgl/shaders/*.glsl` | shader relief, flowmap, footer + `config.glsl` |
 | `src/home/Gallery.ts` | plane media sinkron DOM, render GLB ke target |
 | `src/home/dom.ts` + `manifest.ts` | bangun DOM scrollable + data 18 project |
 | `src/home/ScrollCursor.ts` | titik kursor + streak mode fast |

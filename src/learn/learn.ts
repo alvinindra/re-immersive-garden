@@ -129,6 +129,8 @@ for (const id of sectionIds) {
   const btn = document.createElement("button")
   btn.className = "done-btn"
   btn.type = "button"
+  btn.id = `done-${id}`
+  btn.setAttribute("aria-controls", id)
   btn.dataset.section = id
   btn.addEventListener("click", () => toggleDone(id, btn))
   paintButton(btn, id)

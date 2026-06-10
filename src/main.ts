@@ -7,7 +7,7 @@ import { buildHomeDom, buildFooter } from "./home/dom"
 
 if ("scrollRestoration" in history) history.scrollRestoration = "manual"
 
-initCursor()
+const updateCursor = initCursor()
 
 const blocksRoot = document.querySelector<HTMLElement>("#blocks")
 const content = document.querySelector<HTMLElement>("#scroll-content")
@@ -76,6 +76,7 @@ const loop = (t: number) => {
   scroll.raf(t)
   app.update()
   scrollCursor.update(dt)
+  updateCursor()
   requestAnimationFrame(loop)
 }
 requestAnimationFrame(loop)

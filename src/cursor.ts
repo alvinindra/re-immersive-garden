@@ -4,9 +4,13 @@
 
 let labelEl: HTMLElement | null = null
 
-export function initCursor() {
+const noop = () => {}
+
+/** Returns an update function to call from the main RAF loop (no own loop). */
+export function initCursor(): () => void {
   labelEl = document.querySelector<HTMLElement>(".cursor__label")
-  if (!labelEl) return
+  if (!labelEl) return noop
+  const el = labelEl
 
   let tx = window.innerWidth / 2
   let ty = window.innerHeight / 2
@@ -22,13 +26,11 @@ export function initCursor() {
     { passive: true },
   )
 
-  const tick = () => {
+  return () => {
     cx += (tx - cx) * 0.15
     cy += (ty - cy) * 0.15
-    labelEl!.style.transform = `translate(${cx}px, ${cy}px)`
-    requestAnimationFrame(tick)
+    el.style.transform = `translate(${cx}px, ${cy}px)`
   }
-  tick()
 }
 
 /** Show/hide the cursor label text (null hides it). */

@@ -8,6 +8,18 @@ const lerp = (a: number, b: number, t: number) => a + (b - a) * t
  * "fast mode" and flows with scroll speed. Constants are lifted from the bundle:
  *   { number: 120, space: 2, speed: 50, mix: 0 }.
  */
+// fast-mode tuning — values verbatim from the original bundle, do not retune
+const FAST = {
+  floor: 0.02, // scroll speed below this never charges fast mode
+  gain: 5, // how quickly above-floor speed charges `fast`
+  decay: 1.0, // fast progress lost per second at rest
+  threshold: 0.6, // fast progress required to enter fast mode
+  spreadFactor: 41, // dot spacing / flow multiplier
+  mixInEase: 4,
+  mixOutEase: 1.6,
+  followEase: 0.1, // pointer-follow lerp (per 60fps frame)
+}
+
 export class ScrollCursor {
   private cfg = { number: 120, space: 2, speed: 50 }
   private root: HTMLElement
@@ -59,25 +71,25 @@ export class ScrollCursor {
   onScroll(s: ScrollState) {
     this.scrollY = -s.scrollPct * this.cfg.speed
     // accumulate fast progress only above a brisk-scroll floor; decays in update()
-    if (s.speed > 0.02) {
-      this.fast = Math.min(1, this.fast + (s.speed - 0.02) * 5)
+    if (s.speed > FAST.floor) {
+      this.fast = Math.min(1, this.fast + (s.speed - FAST.floor) * FAST.gain)
     }
   }
 
   update(dt: number) {
-    const k = 1 - Math.exp(-0.1 * dt * 60)
+    const k = 1 - Math.exp(-FAST.followEase * dt * 60)
     this.pos.x = lerp(this.pos.x, this.mouse.x, k)
     this.pos.y = lerp(this.pos.y, this.mouse.y, k)
     this.root.style.transform = `translate3d(${this.pos.x}px, ${this.pos.y}px, 0)`
 
     // fast progress decays toward 0 at rest; mix eases to match the fast state
-    this.fast = Math.max(0, this.fast - dt * 1.0)
-    const isFast = this.fast > 0.6
-    this.mix = lerp(this.mix, isFast ? 1 : 0, isFast ? dt * 4 : dt * 1.6)
+    this.fast = Math.max(0, this.fast - dt * FAST.decay)
+    const isFast = this.fast > FAST.threshold
+    this.mix = lerp(this.mix, isFast ? 1 : 0, isFast ? dt * FAST.mixInEase : dt * FAST.mixOutEase)
     document.body.classList.toggle("is-fast", this.mix > 0.5)
 
-    const spread = (this.fast * 41) * this.cfg.space
-    const flow = this.scrollY * this.fast * 41
+    const spread = (this.fast * FAST.spreadFactor) * this.cfg.space
+    const flow = this.scrollY * this.fast * FAST.spreadFactor
 
     for (let i = 0; i < this.cfg.number; i++) {
       const alt = i % 2

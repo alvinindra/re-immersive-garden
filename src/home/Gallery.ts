@@ -30,6 +30,15 @@ const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v
 
 const MAX_VIDEOS = 3
 
+// scroll "feel" — values verbatim from the original bundle, do not retune
+const SCROLL_PHYSICS = {
+  velDivisor: 2600, // raw px/s → normalized shader velocity
+  deformDivisor: 2200, // raw px/s → plane deform amount
+  velEase: 0.12,
+  deformEase: 0.1,
+  velDecay: 0.9, // per-frame decay of the raw velocity sample
+}
+
 type Kind = "image" | "video" | "glb"
 
 interface ScreenRect {
@@ -362,11 +371,11 @@ export class Gallery {
   }
 
   private updateScrollPhysics() {
-    const targetVel = clamp(this.rawVel / 2600, -1, 1)
-    const targetDeform = Math.min(1, Math.abs(this.rawVel) / 2200)
-    this.velNorm = lerp(this.velNorm, targetVel, 0.12)
-    this.deform = lerp(this.deform, targetDeform, 0.1)
-    this.rawVel *= 0.9
+    const targetVel = clamp(this.rawVel / SCROLL_PHYSICS.velDivisor, -1, 1)
+    const targetDeform = Math.min(1, Math.abs(this.rawVel) / SCROLL_PHYSICS.deformDivisor)
+    this.velNorm = lerp(this.velNorm, targetVel, SCROLL_PHYSICS.velEase)
+    this.deform = lerp(this.deform, targetDeform, SCROLL_PHYSICS.deformEase)
+    this.rawVel *= SCROLL_PHYSICS.velDecay
   }
 
   private hidePlane(p: MediaPlane) {
