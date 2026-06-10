@@ -234,16 +234,21 @@ export class WebGLApp {
     const vmag = this.pointer.velocity.length()
     this.flowmap.velocity.lerp(this.pointer.velocity, vmag ? 0.1 : 0.04)
 
-    this.updateSweep(dt)
-
-    this.flowmap.update(time, 0)
     this.fluid.update()
-
-    this.sharedUniforms.tFlow.value = this.flowmap.texture
     this.sharedUniforms.tFluidFlowmap.value = this.fluid.texture
     this.sharedUniforms.uTime.value = time
 
-    this.renderer.render(this.homeScene.scene, this.homeScene.camera)
+    // Flowmap (tFlow) feeds only the relief shader, so both the sim pass and the
+    // relief render are skipped once the footer fully covers it (fp >= 0.98).
+    if (this.homeScene.model.visible) {
+      this.updateSweep(dt)
+      this.flowmap.update(time, 0)
+      this.sharedUniforms.tFlow.value = this.flowmap.texture
+      this.renderer.render(this.homeScene.scene, this.homeScene.camera)
+    } else {
+      // footer renders with autoClear=false and needs a cleared color buffer
+      this.renderer.clear()
+    }
 
     this.footerScene.updateAndRender(dt, time, this.fluid.texture)
 

@@ -260,6 +260,12 @@ export class FluidSimulation {
   private pointer = { x: 0, y: 0, init: false }
   private splats: Splat[] = []
 
+  // Idle sleep: dye dissipates at 0.95/frame, so ~300 splat-less frames later the
+  // field is ≤2e-7 — below HalfFloat quantization. Skipping the ~10 FBO passes then
+  // is visually free; any new splat resets the counter and wakes the sim instantly.
+  private idleFrames = 0
+  private static readonly SLEEP_AFTER = 300
+
   constructor(renderer: WebGLRenderer) {
     this.renderer = renderer
 
@@ -492,6 +498,12 @@ export class FluidSimulation {
   }
 
   update() {
+    if (this.splats.length === 0) {
+      if (++this.idleFrames > FluidSimulation.SLEEP_AFTER) return
+    } else {
+      this.idleFrames = 0
+    }
+
     const r = this.renderer
     const prevTarget = r.getRenderTarget()
     const prevAutoClear = r.autoClear
