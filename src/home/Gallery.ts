@@ -30,6 +30,17 @@ const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v
 
 const MAX_VIDEOS = 3
 
+// real bundle: gsap.to(uHover, { duration: 2, value: 0|1 }) — default power1.out
+const HOVER_DURATION = 2
+
+/** Textures the hover treatment borrows from the relief pipeline (read-only). */
+export interface HoverFxSources {
+  /** Current flowmap trail texture — ping-pong RT, re-read every frame. */
+  flow: () => Texture | null
+  /** The shared mask-noise texture (real site's txt/mask-noise). */
+  maskNoise: () => Texture | null
+}
+
 // scroll "feel" — values verbatim from the original bundle, do not retune
 const SCROLL_PHYSICS = {
   velDivisor: 2600, // raw px/s → normalized shader velocity
@@ -67,6 +78,8 @@ interface MediaPlane {
   loaded: boolean
   requested: boolean
   hoverTarget: number
+  hoverFrom: number
+  hoverT: number // 0..1 tween progress toward hoverTarget
   opacityTarget: number
   video?: HTMLVideoElement
   videoTex?: VideoTexture
@@ -102,11 +115,35 @@ export class Gallery {
   private videoCandidates: MediaPlane[] = []
 
   private savedClear = new Color()
-  private onCursor: (text: string | null) => void
+  private onCursor: (text: string | null, light?: boolean) => void
+  private fx?: HoverFxSources
 
-  constructor(renderer: WebGLRenderer, onCursor: (text: string | null) => void) {
+  // uniforms shared by every plane material (one object, many materials)
+  private uMouseScreen = { value: new Vector2(0.5, 0.5) }
+  private tFlowShared: { value: Texture | null } = { value: null }
+  private tMaskNoiseShared: { value: Texture | null } = { value: null }
+  private uScreenRes = { value: new Vector2(1, 1) }
+  private uShrinkPx = { value: window.innerHeight * 0.003 }
+
+  constructor(
+    renderer: WebGLRenderer,
+    onCursor: (text: string | null, light?: boolean) => void,
+    fx?: HoverFxSources,
+  ) {
     this.renderer = renderer
     this.onCursor = onCursor
+    this.fx = fx
+
+    window.addEventListener(
+      "pointermove",
+      (e) => {
+        this.uMouseScreen.value.set(
+          e.clientX / window.innerWidth,
+          1 - e.clientY / window.innerHeight,
+        )
+      },
+      { passive: true },
+    )
 
     const w = window.innerWidth
     const h = window.innerHeight
@@ -150,7 +187,15 @@ export class Gallery {
           uHasTexture: { value: false },
           uPlaceholder: { value: new Color(0.74, 0.74, 0.74) },
           uTime: { value: 0 },
-          uMouseLocal: { value: new Vector2(0.5, 0.5) },
+          uMouse: this.uMouseScreen,
+          tFlow: this.tFlowShared,
+          tMaskNoise: this.tMaskNoiseShared,
+          uResolution: this.uScreenRes,
+          uShrinkPx: this.uShrinkPx,
+          uPlaneSize: { value: new Vector2(1, 1) },
+          uRandom: {
+            value: new Vector3(Math.random(), Math.random(), Math.random()),
+          },
         },
       })
       const mesh = new Mesh(this.geometry, material)
@@ -168,6 +213,8 @@ export class Gallery {
         loaded: false,
         requested: false,
         hoverTarget: 0,
+        hoverFrom: 0,
+        hoverT: 1,
         opacityTarget: 0,
         docTop: 0,
         left: 0,
@@ -178,19 +225,22 @@ export class Gallery {
       this.planes.push(plane)
 
       el.addEventListener("pointerenter", () => {
-        plane.hoverTarget = 1
-        this.onCursor(plane.title ? "Discover" : null)
+        if (plane.kind === "glb") {
+          // real site: GLB planes get the cursor label (dark, on the light paper)
+          // but never tween uHover — no dim/smoke treatment
+          this.onCursor(plane.title ? "Discover" : null, false)
+          return
+        }
+        this.startHover(plane, 1)
+        el.classList.add("is-hover")
+        this.onCursor(plane.title ? "Discover" : null, true)
       })
       el.addEventListener("pointerleave", () => {
-        plane.hoverTarget = 0
+        if (plane.kind !== "glb") {
+          this.startHover(plane, 0)
+          el.classList.remove("is-hover")
+        }
         this.onCursor(null)
-      })
-      el.addEventListener("pointermove", (e) => {
-        const r = el.getBoundingClientRect()
-        ;(plane.material.uniforms.uMouseLocal.value as Vector2).set(
-          (e.clientX - r.left) / r.width,
-          1 - (e.clientY - r.top) / r.height,
-        )
       })
       el.addEventListener("click", () => {
         if (plane.uri) window.open("https://immersive-g.com/" + plane.uri, "_blank")
@@ -317,9 +367,23 @@ export class Gallery {
     this.rawVel = s.velocity
   }
 
+  private startHover(p: MediaPlane, target: number) {
+    p.hoverFrom = p.material.uniforms.uHover.value as number
+    p.hoverTarget = target
+    p.hoverT = 0
+  }
+
   update(dt: number) {
     const w = window.innerWidth
     const h = window.innerHeight
+
+    // relief pipeline inputs for the hover treatment — the flowmap is a ping-pong
+    // render target, so its texture must be re-read every frame
+    if (this.fx) {
+      this.tFlowShared.value = this.fx.flow()
+      if (!this.tMaskNoiseShared.value) this.tMaskNoiseShared.value = this.fx.maskNoise()
+    }
+    this.renderer.getDrawingBufferSize(this.uScreenRes.value)
 
     this.updateScrollPhysics()
 
@@ -397,7 +461,13 @@ export class Gallery {
   private updatePlaneUniforms(p: MediaPlane, r: ScreenRect, dt: number, h: number, time: number) {
     const u = p.material.uniforms
     u.uPlaneAspect.value = r.width / r.height
-    u.uHover.value = lerp(u.uHover.value, p.hoverTarget, 1 - Math.exp(-dt * 1.6))
+    ;(u.uPlaneSize.value as Vector2).set(r.width, r.height)
+    // power1.out over 2s, like the real bundle's gsap tween
+    if (p.hoverT < 1) {
+      p.hoverT = Math.min(1, p.hoverT + dt / HOVER_DURATION)
+      const k = 1 - (1 - p.hoverT) * (1 - p.hoverT)
+      u.uHover.value = lerp(p.hoverFrom, p.hoverTarget, k)
+    }
     u.uScrollVel.value = this.velNorm
     u.uDeform.value = this.deform
     u.uTime.value = time
@@ -455,6 +525,7 @@ export class Gallery {
     this.camera.top = h / 2
     this.camera.bottom = -h / 2
     this.camera.updateProjectionMatrix()
+    this.uShrinkPx.value = h * 0.003
     this.measureLayout()
   }
 }

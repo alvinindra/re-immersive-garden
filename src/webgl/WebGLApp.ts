@@ -24,6 +24,7 @@ export class WebGLApp {
   
   private homeScene: HomeScene
   private footerScene: FooterScene
+  private maskNoiseTex: Texture | null = null
   
   private clock = { start: performance.now() }
   private dpr: number
@@ -112,6 +113,17 @@ export class WebGLApp {
     this.sharedUniforms.tPlaster.value = plaster
     this.sharedUniforms.tMaskNoise.value = maskNoise
     this.flowmap.setNoise(flowNoise)
+    this.maskNoiseTex = flowNoise
+  }
+
+  /** Current flow trail texture (ping-pong RT — re-read every frame). */
+  get flowTexture(): Texture {
+    return this.flowmap.texture
+  }
+
+  /** The real site's txt/mask-noise, shared with the gallery hover mask. */
+  get maskNoiseTexture(): Texture | null {
+    return this.maskNoiseTex
   }
 
   load(url: string): Promise<void> {
@@ -160,17 +172,21 @@ export class WebGLApp {
     return this.dpr
   }
 
-  setScroll(scrollPct: number, speed: number) {
+  /** footerT: 0..1 progress of the footer entering the viewport (0 = not visible yet) */
+  setScroll(scrollPct: number, speed: number, footerT: number) {
     this.homeScene.setScroll(scrollPct)
     this.sharedUniforms.uScreenScroll.value = scrollPct
     this.sharedUniforms.uScrollSpeed.value = speed
 
-    const t = Math.max(0, Math.min(1, (scrollPct - 0.9) / 0.1))
+    const t = Math.max(0, Math.min(1, footerT))
     const fp = t * t * (3 - 2 * t)
-    
-    this.footerScene.progress = fp
-    this.footerScene.model.visible = fp > 0.001
-    
+
+    // flowers only once the footer is almost fully in view (last 10% of its
+    // entry) — earlier they'd draw as opaque silhouettes over the gallery
+    const ft = Math.max(0, Math.min(1, (footerT - 0.9) / 0.1))
+    this.footerScene.progress = ft * ft * (3 - 2 * ft)
+    this.footerScene.model.visible = ft > 0.001
+
     this.setDarkness(fp)
     this.homeScene.model.visible = fp < 0.98
   }

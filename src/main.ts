@@ -43,7 +43,10 @@ canvas.addEventListener("webglcontextlost", (e) => {
 })
 
 const scroll = new SmoothScroll()
-const gallery = new Gallery(app.renderer, setCursorLabel)
+const gallery = new Gallery(app.renderer, setCursorLabel, {
+  flow: () => app.flowTexture,
+  maskNoise: () => app.maskNoiseTexture,
+})
 const scrollCursor = new ScrollCursor()
 
 app.setOverlay(gallery)
@@ -52,9 +55,13 @@ app.setOverlay(gallery)
 
 scroll.onScroll((s) => {
   gallery.setScroll(s)
-  app.setScroll(s.scrollPct, s.speed)
+  // footer is the last 100dvh of the page: 0 when it starts entering the
+  // viewport, 1 when fully in view — independent of total page height
+  const limit = scroll.lenis.limit || 1
+  const footerT = (s.scrollPct * limit - (limit - window.innerHeight)) / window.innerHeight
+  app.setScroll(s.scrollPct, s.speed, footerT)
   scrollCursor.onScroll(s)
-  document.body.classList.toggle("is-dark", s.scrollPct > 0.93)
+  document.body.classList.toggle("is-dark", footerT > 0.3)
 })
 
 // both GLBs stream in parallel; nothing below waits on them

@@ -33,12 +33,14 @@ export function initCursor(): () => void {
   }
 }
 
-/** Show/hide the cursor label text (null hides it). */
-export function setCursorLabel(text: string | null) {
+/** Show/hide the cursor label text (null hides it). `light` renders it #e8e8e8 —
+ *  the real site's `.cursor.isDark` (cursor over dark content). */
+export function setCursorLabel(text: string | null, light = false) {
   if (!labelEl) return
   if (text) {
     labelEl.textContent = text
     labelEl.classList.add("is-visible")
+    labelEl.classList.toggle("is-light", light)
   } else {
     labelEl.classList.remove("is-visible")
   }

@@ -107,16 +107,17 @@ function mediaBlock(
     if (uri) media.setAttribute("data-uri", uri)
     if (title) media.setAttribute("data-title", title)
   }
-  grid.appendChild(media)
-
-  // small caption under a project's lead media (title + type)
-  if (title && type && item.kind !== "legend" && !portrait) {
+  // hover caption at the plane's bottom-left (real site: white MSDF title + type,
+  // staggered in while hovered; GLB planes never get one)
+  if (title && item.kind !== "legend" && item.kind !== "glb") {
     const cap = document.createElement("div")
     cap.className = "media__caption"
-    cap.style.gridColumn = `${item.col} / span ${item.width}`
-    cap.innerHTML = `<span class="media__title">${title}</span><span class="media__type">${type}</span>`
-    grid.appendChild(cap)
+    cap.innerHTML =
+      `<span class="media__title">${title}</span>` +
+      (type ? `<span class="media__type">${type}</span>` : "")
+    media.appendChild(cap)
   }
+  grid.appendChild(media)
 
   wrap.appendChild(grid)
   return wrap

@@ -9,6 +9,8 @@
 uniform float uHover;          // 0..1 eased hover state
 uniform float uScrollVel;      // signed normalized scroll velocity
 uniform float uDeform;         // 0..1 deformation progress (ramps with scroll speed)
+uniform vec2 uPlaneSize;       // plane size in CSS px
+uniform float uShrinkPx;       // hover inset in px (real: 0.03 scene units each axis)
 
 varying vec2 vUv;
 
@@ -17,9 +19,11 @@ void main() {
 
   vec3 pos = position;
 
-  // Real site barely insets the plane on hover (≈3px), so the geometry effectively
-  // stays put — the hover treatment lives in the fragment shader. No vertex hover
-  // scale here (the old ~4% shrink + edge-widen made the plane "pop").
+  // Hover insets the plane a few px (real: pos.xy *= 1 - (1/uPlaneSize)*0.03),
+  // revealing a sliver of the paper behind; the fragment shader insets the UV by
+  // the same amount so the content doesn't rescale.
+  vec2 hoverScale = vec2(1.0) - uShrinkPx / uPlaneSize;
+  pos.xy *= mix(vec2(1.0), hoverScale, uHover);
 
   vec4 clip = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
 

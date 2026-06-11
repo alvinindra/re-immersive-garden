@@ -183,8 +183,45 @@ html.lenis body {
   pointer-events: auto;
   cursor: pointer;
 }
+/* hover caption — real site renders a white MSDF "title  type" pair at the plane's
+   bottom-left, slid in (+stagger) while hovered. Title full white, type 50%. */
 .media__caption {
-  display: none; /* desktop shows project name via the cursor, not inline */
+  position: absolute;
+  left: 24px;
+  bottom: 6px;
+  display: flex;
+  gap: 10px;
+  font-family: HelveticaNeueRegular, sans-serif;
+  font-size: 12px;
+  line-height: 1.1;
+  color: #fff;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.media__caption span {
+  opacity: 0;
+  transform: translateX(-12px);
+  /* hover-out: 1s, the site's "slow" ease */
+  transition: opacity 1s cubic-bezier(0.445, 0.05, 0.55, 0.95),
+    transform 1s cubic-bezier(0.445, 0.05, 0.55, 0.95);
+}
+.media__caption .media__type {
+  color: rgba(255, 255, 255, 0.5); /* real: uColorAlpha 0.5 */
+}
+.media.is-hover .media__caption span {
+  opacity: 1;
+  transform: none;
+  /* hover-in: 2s "fast" ease (sharp start, long settle), 75ms stagger */
+  transition: opacity 2s cubic-bezier(0.19, 1, 0.22, 1),
+    transform 2s cubic-bezier(0.19, 1, 0.22, 1);
+}
+.media.is-hover .media__caption span + span {
+  transition-delay: 75ms;
+}
+@media (hover: none) {
+  .media__caption {
+    display: none;
+  }
 }
 
 /* project = stacked media + legend rows. Vertical rhythm copied verbatim from the
@@ -353,25 +390,29 @@ body.is-fast .allProjects {
 }
 
 /* ---- cursor hover label --------------------------------------------------- */
+/* real .cursor__text: 12px Helvetica at pointer + (30px, 10px); default ink
+   #030303, `.isDark` (over dark content, e.g. hovered project media) #e8e8e8 */
 .cursor__label {
   position: fixed;
   top: 0;
   left: 0;
   z-index: 20;
-  padding-left: 18px;
-  margin-top: -0.6em;
+  padding-left: 30px;
+  padding-top: 10px;
   font-family: HelveticaNeueRegular, sans-serif;
-  font-size: clamp(12px, var(--ui), 15px);
-  color: #030303;
+  font-size: 12px;
+  line-height: 1.1;
+  color: var(--ink);
   white-space: nowrap;
   pointer-events: none;
   opacity: 0;
-  transition: opacity 0.3s ease;
+  transition: opacity 0.5s cubic-bezier(0.445, 0.05, 0.55, 0.95);
   will-change: transform;
 }
 .cursor__label.is-visible {
   opacity: 1;
 }
+.cursor__label.is-light,
 body.is-dark .cursor__label {
   color: var(--light);
 }
