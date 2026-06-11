@@ -7,7 +7,7 @@ Tujuannya bukan sekadar "ini kodenya", tapi supaya kamu paham **kenapa** setiap 
 > [!NOTE]
 > Istilah teknis (shader, uniform, framebuffer, dst.) sengaja dibiarkan dalam Bahasa Inggris karena itu istilah baku yang akan kamu temui di dokumentasi three.js, tutorial, dan kode project ini sendiri.
 
-Project ini **vanilla TypeScript + Vite** — tidak ada React, tidak ada framework 3D tambahan. Hanya `three` dan `lenis` (smooth scroll). Itu disengaja: dengan sedikit lapisan abstraksi, kamu bisa melihat langsung apa yang terjadi.
+Project ini **React 19 + TypeScript + Vite**, dengan [react-three-fiber](https://docs.pmnd.rs/react-three-fiber) (R3F) sebagai jembatan React ke three.js. Pembagiannya jelas: **React memiliki DOM** (grid project, caption, kursor) dan elemen `<Canvas>`, sementara **pipeline WebGL-nya tetap imperatif** — class `WebGLApp`, `Flowmap`, `FluidSimulation` dijalankan dari satu `useFrame` prioritas-1 yang mengambil alih frameloop R3F. State scroll/pointer/hover mengalir lewat store [zustand](https://github.com/pmndrs/zustand) yang dibaca secara *transient* (tanpa memicu render React). Jadi semua konsep WebGL di dokumen ini tetap berlaku apa adanya; React hanya lapisan orkestrasi di atasnya.
 
 ---
 
@@ -26,20 +26,24 @@ CPU mengerjakan instruksi secara berurutan (beberapa core). GPU punya ribuan cor
 
 ### Canvas tempat semuanya digambar
 
-Di `index.html` ada satu baris:
+Canvas dibuat oleh R3F lewat komponen `<Canvas>` di `src/webgl/WebGLCanvas.tsx`:
 
-```html
-<canvas id="webgl"></canvas>
+```tsx
+<div id="webgl">
+  <Canvas flat gl={{ antialias: true, alpha: false }} dpr={[1, 2]}>
+    <Experience />
+  </Canvas>
+</div>
 ```
 
-Itulah seluruh permukaan gambar. Di `src/main.ts`, canvas ini diserahkan ke three.js:
+R3F membuat `WebGLRenderer`-nya sendiri; renderer itu lalu diserahkan ke pipeline imperatif di `src/webgl/Experience.tsx`:
 
-```ts
-const canvas = document.querySelector<HTMLCanvasElement>("#webgl")
-const app = new WebGLApp(canvas)
+```tsx
+const gl = useThree((s) => s.gl)          // renderer milik R3F
+const [app] = useState(() => new WebGLApp(gl))
 ```
 
-Semua relief, galeri, dan footer digambar di **satu canvas yang sama** yang menutupi layar penuh (`position: fixed; inset: 0`). DOM (teks, judul project) discroll di atasnya.
+Semua relief, galeri, dan footer digambar di **satu canvas yang sama** yang menutupi layar penuh (`position: fixed; inset: 0` pada wrapper `#webgl`). DOM (teks, judul project) discroll di atasnya. Prop `flat` penting: tanpa itu R3F menyalakan ACES tone mapping yang akan mengubah semua warna relief.
 
 ---
 
@@ -175,7 +179,7 @@ renderer.setRenderTarget(null) // kembali menggambar ke layar
 // sekarang rt.texture bisa dipakai sebagai input shader lain
 ```
 
-Galeri memakai ini untuk merender model GLB ke texture (`src/home/Gallery.ts`), dan flowmap serta fluid sim memakainya secara intensif.
+Galeri memakai ini untuk merender model GLB ke texture (`src/gallery/GalleryCoordinator.ts`), dan flowmap serta fluid sim memakainya secara intensif.
 
 ### Ping-pong: cara shader "mengingat" frame sebelumnya
 
@@ -217,7 +221,7 @@ Project ini memakai **kedua** jenis, dan perbedaannya penting:
 | | PerspectiveCamera | OrthographicCamera |
 |---|---|---|
 | Efek | objek jauh terlihat kecil (seperti mata manusia) | ukuran objek tidak berubah oleh jarak |
-| Dipakai untuk | relief 3D, model footer, model GLB galeri | galeri media 2D (`Gallery.ts`), pass fullscreen (flowmap, fluid) |
+| Dipakai untuk | relief 3D, model footer, model GLB galeri | galeri media 2D (`GalleryCoordinator.ts`), pass fullscreen (flowmap, fluid) |
 | Parameter | `fov, aspect, near, far` | `left, right, top, bottom, near, far` |
 
 Galeri memakai orthographic dengan koordinat **piksel** persis (`-w/2 .. w/2`), supaya plane WebGL bisa ditempatkan tepat di atas placeholder DOM-nya:
@@ -284,7 +288,7 @@ const loop = (t: number) => {
 requestAnimationFrame(loop)
 ```
 
-`requestAnimationFrame` memberi timestamp `t` (milidetik) dan menyinkronkan dengan refresh layar. Project ini punya **satu** loop utama yang menggerakkan segalanya — dibahas di bagian berikutnya.
+`requestAnimationFrame` memberi timestamp `t` (milidetik) dan menyinkronkan dengan refresh layar. Di project ini loop itu dimiliki R3F: `useFrame(callback, priority)` mendaftarkan callback ke frameloop internal R3F. Dengan **priority > 0**, R3F berhenti merender otomatis dan callback kita yang memegang kendali penuh satu frame — dipakai di `Experience.tsx`. Tetap **satu** loop utama yang menggerakkan segalanya — dibahas di bagian berikutnya.
 
 ### Color space & device pixel ratio (DPR)
 
@@ -297,18 +301,27 @@ Dua hal yang sering bikin warna/ketajaman "salah":
 
 ## 6. Arsitektur project ini
 
-Sekarang gambaran besarnya. Semua dijahit di `src/main.ts`. Alurnya:
+Sekarang gambaran besarnya. React memiliki pohon komponen; pipeline WebGL dijahit di `src/webgl/Experience.tsx`. Alurnya:
 
 ```
+   React tree (src/App.tsx)
+   <ReactLenis root>                          <- smooth scroll di window
+     <ScrollBridge/>                          <- lenis tick -> scrollStore + listeners
+     <WebGLCanvas>                            <- R3F <Canvas flat>
+       <Experience/>                          <- new WebGLApp(gl) + useFrame prioritas-1
+         <GalleryOverlay/>                    <- registry <MediaBlock> -> GalleryCoordinator
+     <Topbar/> <Hero/> <Blocks/> <HomeFooter/>  <- DOM yang discroll
+     <CursorLabel/> <ScrollCursorDots/>
+
                  pointermove                 scroll (Lenis)
                       |                            |
                       v                            v
-                 [ Flowmap ]                 [ SmoothScroll ]
+                 [ Flowmap ]                 [ ScrollBridge ]
                  [ Fluid    ]                       |
                       |                              | {scrollY, speed, scrollPct}
                       v                              v
-   ============== satu RAF loop di main.ts ====================
-   scroll.raf(t)  ->  relief.update()  ->  scrollCursor.update()
+   ========= satu useFrame prioritas-1 di Experience.tsx =========
+   lenis.raf(t)  ->  scroll listeners  ->  app.update()
                            |
         +------------------+-------------------+
         v                  v                   v
@@ -321,24 +334,32 @@ Sekarang gambaran besarnya. Semua dijahit di `src/main.ts`. Alurnya:
                     satu canvas WebGL
 ```
 
-### main.ts: kabel utamanya
+### Experience.tsx: kabel utamanya
 
-```ts
-const app = new WebGLApp(canvas)
-const scroll = new SmoothScroll()
-const gallery = new Gallery(app.renderer, setCursorLabel)
-const scrollCursor = new ScrollCursor()
+```tsx
+const gl = useThree((s) => s.gl)
+const [app] = useState(() => new WebGLApp(gl))
 
-app.setOverlay(gallery)  // galeri digambar sebagai pass kedua DI DALAM relief
+useEffect(() => {
+  const off = onScroll((s) => {
+    app.setScroll(s.scrollPct, s.speed, footerT) // pan relief + cross-fade footer
+  })
+  return () => { off(); app.dispose() }
+}, [app])
 
-scroll.onScroll((s) => {
-  gallery.setScroll(s)
-  app.setScroll(s.scrollPct, s.speed) // pan relief + cross-fade footer
-  scrollCursor.onScroll(s)
-})
+// priority 1 = R3F berhenti merender otomatis; callback ini memegang frame
+useFrame(() => {
+  lenis.raf(performance.now())  // scroll state mendarat dulu...
+  app.update()                  // ...baru pipeline membacanya
+}, 1)
 ```
 
-Perhatikan: galeri **berbagi renderer yang sama** dengan relief (`app.renderer`). Tidak ada dua canvas atau dua konteks WebGL — itu boros. Sebagai gantinya, satu renderer menggambar relief dulu, lalu galeri di atasnya.
+Sisi DOM, tiap `<MediaBlock>` (di `src/components/Blocks.tsx`) mendaftarkan elemennya ke registry (`src/gallery/registry.ts`); `<GalleryOverlay>` meneruskannya ke `GalleryCoordinator` dan memasangnya sebagai overlay (`app.setOverlay`). Event hover juga hidup di JSX `<MediaBlock>`, bukan `addEventListener` manual.
+
+Dua hal penting di sini:
+
+- Galeri **berbagi renderer yang sama** dengan relief. Tidak ada dua canvas atau dua konteks WebGL — itu boros. Satu renderer menggambar relief dulu, lalu galeri di atasnya.
+- Scroll/pointer **tidak pernah menyentuh state React**. `ScrollBridge` menulis ke store zustand secara mutasi langsung (transient); `useFrame` dan para listener membacanya tanpa render ulang React. Kalau tiap tick scroll memicu `setState`, React akan re-render 60x/detik — jank.
 
 ### Multi-pass dalam satu frame
 
@@ -691,7 +712,7 @@ Semua angka ajaib (dissipation 0.953, fov 30, fresnel sharpness 35, dst.) bukan 
 
 ## 10. Deep dive: Gallery (plane media sinkron DOM)
 
-Galeri adalah deretan media project (video/gambar/model) yang discroll. Triknya: tiap media adalah **plane WebGL** yang diposisikan **persis** di atas placeholder DOM-nya. File: `src/home/Gallery.ts` + `shaders/gallery.*.glsl`.
+Galeri adalah deretan media project (video/gambar/model) yang discroll. Triknya: tiap media adalah **plane WebGL** yang diposisikan **persis** di atas placeholder DOM-nya. File: `src/gallery/GalleryCoordinator.ts` + `src/home/shaders/gallery.*.glsl`.
 
 ### Kamera ortho ruang piksel
 
@@ -703,7 +724,7 @@ Dengan kamera ortho yang batasnya = setengah lebar/tinggi layar dalam piksel, 1 
 
 ### Sinkronisasi ke rect DOM
 
-DOM dibangun di `src/home/dom.ts` dengan placeholder `[data-media]`. Tiap frame, galeri membaca posisi placeholder dan menyetel plane:
+DOM dibangun React di `src/components/Blocks.tsx`; tiap `<MediaBlock>` mendaftarkan elemen + metadata-nya (kind, src, portrait, judul) ke registry zustand saat mount, dan koordinator membuat satu plane per item. Tiap frame, galeri membaca posisi placeholder dan menyetel plane:
 
 ```ts
 const cx = r.left + r.width / 2 - w / 2
@@ -773,29 +794,32 @@ for (let i = 0; i < videoCandidates.length; i++) {
 
 ## 11. Smooth scroll (Lenis) & integrasinya
 
-Scroll yang "berat & meluncur" itu bukan CSS — itu **Lenis**, library smooth scroll. File: `src/scroll/SmoothScroll.ts`.
+Scroll yang "berat & meluncur" itu bukan CSS — itu **Lenis**, library smooth scroll, dipasang lewat `<ReactLenis root>` di `src/App.tsx` dengan opsi dari `src/scroll/scrollStore.ts`:
 
 ```ts
-this.lenis = new Lenis({
+export const LENIS_OPTIONS = {
   lerp: 0.05,                      // makin kecil makin "berat"/lambat menyusul
   easing: (t) => Math.min(1, 1.001 - Math.pow(2, -10 * t)), // easing eksponensial
   orientation: "vertical",
-})
+  autoRaf: false,                  // digerakkan dari useFrame, bukan loop sendiri
+}
 ```
 
-Lenis tidak benar-benar menggeser scrollbar native; ia menginterpolasi posisi scroll dan memberi tahu kita tiap frame. Tiap event, ia memancarkan state yang dipakai seluruh sistem:
+Lenis tidak benar-benar menggeser scrollbar native; ia menginterpolasi posisi scroll dan memberi tahu kita tiap frame. Tiap tick, komponen `ScrollBridge` (`src/App.tsx`) memancarkan state yang dipakai seluruh sistem:
 
 ```ts
-this.state.scrollY = this.lenis.scroll
-this.state.velocity = this.lenis.velocity
-this.state.speed = Math.abs(this.lenis.velocity / 1000) * 0.1
-this.state.scrollPct = this.lenis.scroll / this.lenis.limit  // 0..1
+const s = useScrollStore.getState().state   // dimutasi langsung — transient
+s.scrollY = lenis.scroll
+s.velocity = lenis.velocity
+s.speed = Math.abs(lenis.velocity / 1000) * 0.1
+s.scrollPct = lenis.scroll / lenis.limit    // 0..1
+for (const fn of listeners) fn(s)           // pipeline, galeri, dot cursor
 ```
 
-`scrollPct` (0 di atas, 1 di bawah) menggerakkan banyak hal: relief mem-pan vertikal mengikuti scroll, dan footer cross-fade masuk di 10% scroll terakhir (lihat `WebGLApp.setScroll`). Lenis digerakkan dari loop utama yang sama: `scroll.raf(t)`.
+`scrollPct` (0 di atas, 1 di bawah) menggerakkan banyak hal: relief mem-pan vertikal mengikuti scroll, dan footer cross-fade masuk di 10% scroll terakhir (lihat `WebGLApp.setScroll`). Lenis digerakkan dari loop utama yang sama: `lenis.raf(t)` di awal `useFrame` `Experience.tsx` (`autoRaf: false`), supaya state scroll selalu mendarat sebelum render membacanya.
 
 > [!NOTE]
-> Satu RAF loop menggerakkan SEMUANYA — Lenis, flowmap, fluid, relief, galeri, scroll cursor. Ini penting: kalau tiap sistem punya loop sendiri, mereka bisa tidak sinkron dan boros. Satu loop = satu sumber waktu, satu titik render.
+> Satu frameloop menggerakkan SEMUANYA — Lenis, flowmap, fluid, relief, galeri (kursor DOM punya rAF kecil sendiri karena hidup di luar `<Canvas>`). Ini penting: kalau tiap sistem punya loop sendiri, mereka bisa tidak sinkron dan boros. Satu loop = satu sumber waktu, satu titik render.
 
 ---
 
@@ -888,7 +912,7 @@ Dua pola yang layak dihafal:
 
 Efek "berat" ini tetap 60fps karena beberapa keputusan sadar:
 
-- **Cache layout DOM** — `getBoundingClientRect` hanya saat build/resize, bukan tiap frame (`Gallery.measureLayout`).
+- **Cache layout DOM** — `getBoundingClientRect` hanya saat build/resize, bukan tiap frame (`GalleryCoordinator.measureLayout`).
 - **Batasi decode video** — maksimal 3 video aktif (`MAX_VIDEOS`).
 - **Cap DPR di 2** — Retina tajam tanpa render 3x+ piksel.
 - **Texture terkompresi** — `.ktx2` (KTX2/Basis) hemat VRAM; `.glb` di-Draco-compress hemat ukuran unduh.
@@ -896,6 +920,7 @@ Efek "berat" ini tetap 60fps karena beberapa keputusan sadar:
 - **Half-float, bukan float penuh** — render target sim cukup `HalfFloatType`, separuh memori float32.
 - **Satu renderer, satu RAF loop** — tidak ada konteks/loop ganda; semua pass berbagi state.
 - **Pause yang di luar layar** — plane galeri di luar viewport di-`visible = false` dan videonya di-pause.
+- **Tanpa re-render React saat scroll** — scroll/pointer/hover ditulis ke store zustand secara transient dan dibaca di `useFrame`; React hanya render saat mount/perubahan layout, bukan 60x/detik.
 
 > [!TIP]
 > Pelajaran umum: performa WebGL jarang soal "shader terlalu rumit". Lebih sering soal **berapa banyak pekerjaan yang kamu lakukan per frame di JavaScript** (reflow, decode, alokasi) dan **berapa banyak piksel/texture yang diproses**. Kurangi keduanya dulu.
@@ -905,10 +930,10 @@ Efek "berat" ini tetap 60fps karena beberapa keputusan sadar:
 ## 15. Peta file & cara menjalankan
 
 ```bash
-npm install
-npm run dev      # http://localhost:5173/   (homepage)
+bun install
+bun run dev      # http://localhost:5173/   (homepage)
                  # http://localhost:5173/learn/  (halaman ini)
-npm run build    # tsc --noEmit && vite build
+bun run build    # tsc --noEmit && vite build
 ```
 
 Halaman `/learn` ini adalah entry MPA kedua di Vite (lihat `vite.config.ts`). Isinya ditulis sebagai Markdown (`src/learn/content.md`) dan dirender oleh renderer kecil tanpa dependency (`src/learn/markdown.ts`).
@@ -917,18 +942,21 @@ Struktur kode yang relevan:
 
 | File | Tanggung jawab |
 |------|----------------|
-| `src/main.ts` | menjahit scroll -> relief -> galeri -> scroll cursor; satu RAF loop |
+| `src/main.tsx` + `src/App.tsx` | root React: `<ReactLenis>`, `ScrollBridge`, canvas, layout DOM |
+| `src/webgl/WebGLCanvas.tsx` | R3F `<Canvas flat>`, fallback WebGL, context-lost |
+| `src/webgl/Experience.tsx` | `useFrame` prioritas-1: lenis tick -> `app.update()` |
 | `src/webgl/WebGLApp.ts` | scene utama, kamera, load GLB, pointer, sweep, multi-pass, fade footer |
 | `src/webgl/core/Flowmap.ts` | flowmap velocity ping-pong (jejak kursor) |
 | `src/webgl/core/FluidSimulation.ts` | simulasi Navier-Stokes (jejak warna) |
 | `src/webgl/scenes/FooterWind.ts` | spring angin + reaksi kursor bunga footer |
 | `src/webgl/core/LutLoader.ts` | parse `.3dl` jadi LUT 3D |
 | `src/webgl/shaders/*.glsl` | shader relief, flowmap, footer + `config.glsl` |
-| `src/home/Gallery.ts` | plane media sinkron DOM, render GLB ke target |
-| `src/home/dom.ts` + `manifest.ts` | bangun DOM scrollable + data 18 project |
-| `src/home/ScrollCursor.ts` | titik kursor + streak mode fast |
-| `src/scroll/SmoothScroll.ts` | pembungkus Lenis |
-| `src/cursor.ts` | label kursor "Discover" |
+| `src/gallery/GalleryCoordinator.ts` | plane media sinkron DOM, render GLB ke target |
+| `src/gallery/registry.ts` + `GalleryOverlay.tsx` | jembatan `<MediaBlock>` -> koordinator |
+| `src/components/Blocks.tsx` + `src/home/manifest.ts` | DOM scrollable React + data 18 project |
+| `src/components/ScrollCursorDots.tsx` | titik kursor + streak mode fast |
+| `src/scroll/scrollStore.ts` | store zustand scroll + opsi Lenis |
+| `src/components/CursorLabel.tsx` + `src/cursor/cursorStore.ts` | label kursor "Discover" |
 
 ---
 
