@@ -45,10 +45,10 @@ export class WebGLApp {
   private clearBlack = new Color(0.01, 0.01, 0.013)
   private clearTmp = new Color()
 
-  constructor(canvas: HTMLCanvasElement) {
+  constructor(renderer: WebGLRenderer) {
     this.dpr = Math.min(window.devicePixelRatio, 2)
 
-    this.renderer = new WebGLRenderer({ canvas, antialias: true, alpha: false })
+    this.renderer = renderer
     this.renderer.setPixelRatio(this.dpr)
     this.renderer.setSize(window.innerWidth, window.innerHeight)
     this.renderer.outputColorSpace = LinearSRGBColorSpace
@@ -277,11 +277,8 @@ export class WebGLApp {
     }
   }
 
-  start() {
-    const loop = () => {
-      this.update()
-      requestAnimationFrame(loop)
-    }
-    requestAnimationFrame(loop)
+  dispose() {
+    window.removeEventListener("resize", this.onResize)
+    window.removeEventListener("pointermove", this.onPointerMove)
   }
 }

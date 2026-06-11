@@ -21,9 +21,10 @@ import { KTX2Loader } from "three/examples/jsm/loaders/KTX2Loader.js"
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js"
 import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js"
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js"
-import galleryVert from "./shaders/gallery.vert.glsl"
-import galleryFrag from "./shaders/gallery.frag.glsl"
-import type { ScrollState } from "../scroll/SmoothScroll"
+import galleryVert from "../home/shaders/gallery.vert.glsl"
+import galleryFrag from "../home/shaders/gallery.frag.glsl"
+import type { ScrollState } from "../scroll/scrollStore"
+import type { MediaItemMeta, MediaKind } from "./registry"
 
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v))
@@ -50,8 +51,6 @@ const SCROLL_PHYSICS = {
   velDecay: 0.9, // per-frame decay of the raw velocity sample
 }
 
-type Kind = "image" | "video" | "glb"
-
 interface ScreenRect {
   top: number
   bottom: number
@@ -69,12 +68,10 @@ interface GlbScene {
 }
 
 interface MediaPlane {
-  el: HTMLElement
-  kind: Kind
+  meta: MediaItemMeta
+  kind: MediaKind
   mesh: Mesh
   material: ShaderMaterial
-  uri: string | null
-  title: string
   loaded: boolean
   requested: boolean
   hoverTarget: number
@@ -92,7 +89,10 @@ interface MediaPlane {
   videoDist: number
 }
 
-export class Gallery {
+/** The WebGL half of the gallery: DOM-tracked ortho planes rendered as the overlay
+ *  pass. React (<MediaBlock>) owns the DOM elements + pointer events and feeds them
+ *  in via setItems()/setHover(); everything else is Gallery.ts logic verbatim. */
+export class GalleryCoordinator {
   readonly scene = new Scene()
   readonly camera: OrthographicCamera
   private renderer: WebGLRenderer
@@ -100,7 +100,7 @@ export class Gallery {
   private ktx2: KTX2Loader
   private gltf: GLTFLoader
   private envMap: Texture
-  private planes: MediaPlane[] = []
+  private planes = new Map<number, MediaPlane>()
 
   private velNorm = 0
   private deform = 0
@@ -115,7 +115,6 @@ export class Gallery {
   private videoCandidates: MediaPlane[] = []
 
   private savedClear = new Color()
-  private onCursor: (text: string | null, light?: boolean) => void
   private fx?: HoverFxSources
 
   // uniforms shared by every plane material (one object, many materials)
@@ -125,25 +124,11 @@ export class Gallery {
   private uScreenRes = { value: new Vector2(1, 1) }
   private uShrinkPx = { value: window.innerHeight * 0.003 }
 
-  constructor(
-    renderer: WebGLRenderer,
-    onCursor: (text: string | null, light?: boolean) => void,
-    fx?: HoverFxSources,
-  ) {
+  constructor(renderer: WebGLRenderer, fx?: HoverFxSources) {
     this.renderer = renderer
-    this.onCursor = onCursor
     this.fx = fx
 
-    window.addEventListener(
-      "pointermove",
-      (e) => {
-        this.uMouseScreen.value.set(
-          e.clientX / window.innerWidth,
-          1 - e.clientY / window.innerHeight,
-        )
-      },
-      { passive: true },
-    )
+    window.addEventListener("pointermove", this.onPointerMove, { passive: true })
 
     const w = window.innerWidth
     const h = window.innerHeight
@@ -164,89 +149,6 @@ export class Gallery {
     this.envMap = pmrem.fromScene(new RoomEnvironment(), 0.04).texture
 
     window.addEventListener("resize", this.onResize)
-  }
-
-  build() {
-    const els = Array.from(document.querySelectorAll<HTMLElement>("[data-media]"))
-    for (const el of els) {
-      const kind = (el.getAttribute("data-kind") as Kind) || "image"
-      const portrait = el.hasAttribute("data-portrait")
-      const material = new ShaderMaterial({
-        vertexShader: galleryVert,
-        fragmentShader: galleryFrag,
-        transparent: true,
-        depthWrite: false,
-        uniforms: {
-          uTexture: { value: null },
-          uTextureAspect: { value: kind === "glb" ? 1 : portrait ? 3 / 4 : 16 / 9 },
-          uPlaneAspect: { value: 16 / 9 },
-          uHover: { value: 0 },
-          uScrollVel: { value: 0 },
-          uDeform: { value: 0 },
-          uOpacity: { value: 0 },
-          uHasTexture: { value: false },
-          uPlaceholder: { value: new Color(0.74, 0.74, 0.74) },
-          uTime: { value: 0 },
-          uMouse: this.uMouseScreen,
-          tFlow: this.tFlowShared,
-          tMaskNoise: this.tMaskNoiseShared,
-          uResolution: this.uScreenRes,
-          uShrinkPx: this.uShrinkPx,
-          uPlaneSize: { value: new Vector2(1, 1) },
-          uRandom: {
-            value: new Vector3(Math.random(), Math.random(), Math.random()),
-          },
-        },
-      })
-      const mesh = new Mesh(this.geometry, material)
-      mesh.frustumCulled = false
-      mesh.visible = false
-      this.scene.add(mesh)
-
-      const plane: MediaPlane = {
-        el,
-        kind,
-        mesh,
-        material,
-        uri: el.getAttribute("data-uri"),
-        title: el.getAttribute("data-title") || "",
-        loaded: false,
-        requested: false,
-        hoverTarget: 0,
-        hoverFrom: 0,
-        hoverT: 1,
-        opacityTarget: 0,
-        docTop: 0,
-        left: 0,
-        width: 0,
-        height: 0,
-        videoDist: 0,
-      }
-      this.planes.push(plane)
-
-      el.addEventListener("pointerenter", () => {
-        if (plane.kind === "glb") {
-          // real site: GLB planes get the cursor label (dark, on the light paper)
-          // but never tween uHover — no dim/smoke treatment
-          this.onCursor(plane.title ? "Discover" : null, false)
-          return
-        }
-        this.startHover(plane, 1)
-        el.classList.add("is-hover")
-        this.onCursor(plane.title ? "Discover" : null, true)
-      })
-      el.addEventListener("pointerleave", () => {
-        if (plane.kind !== "glb") {
-          this.startHover(plane, 0)
-          el.classList.remove("is-hover")
-        }
-        this.onCursor(null)
-      })
-      el.addEventListener("click", () => {
-        if (plane.uri) window.open("https://immersive-g.com/" + plane.uri, "_blank")
-      })
-    }
-    this.measureLayout()
 
     const target = document.querySelector("#scroll-content") || document.documentElement
     this.layoutObserver = new ResizeObserver(() => {
@@ -260,10 +162,92 @@ export class Gallery {
     this.layoutObserver.observe(target)
   }
 
+  private onPointerMove = (e: PointerEvent) => {
+    this.uMouseScreen.value.set(
+      e.clientX / window.innerWidth,
+      1 - e.clientY / window.innerHeight,
+    )
+  }
+
+  /** Reconcile the plane set against the React-registered media elements. */
+  setItems(metas: MediaItemMeta[]) {
+    const seen = new Set<number>()
+    for (const meta of metas) {
+      seen.add(meta.id)
+      if (!this.planes.has(meta.id)) this.addPlane(meta)
+    }
+    for (const [id, plane] of this.planes) {
+      if (!seen.has(id)) {
+        this.disposePlane(plane)
+        this.planes.delete(id)
+      }
+    }
+    this.measureLayout()
+  }
+
+  private addPlane(meta: MediaItemMeta) {
+    const material = new ShaderMaterial({
+      vertexShader: galleryVert,
+      fragmentShader: galleryFrag,
+      transparent: true,
+      depthWrite: false,
+      uniforms: {
+        uTexture: { value: null },
+        uTextureAspect: { value: meta.kind === "glb" ? 1 : meta.portrait ? 3 / 4 : 16 / 9 },
+        uPlaneAspect: { value: 16 / 9 },
+        uHover: { value: 0 },
+        uScrollVel: { value: 0 },
+        uDeform: { value: 0 },
+        uOpacity: { value: 0 },
+        uHasTexture: { value: false },
+        uPlaceholder: { value: new Color(0.74, 0.74, 0.74) },
+        uTime: { value: 0 },
+        uMouse: this.uMouseScreen,
+        tFlow: this.tFlowShared,
+        tMaskNoise: this.tMaskNoiseShared,
+        uResolution: this.uScreenRes,
+        uShrinkPx: this.uShrinkPx,
+        uPlaneSize: { value: new Vector2(1, 1) },
+        uRandom: {
+          value: new Vector3(Math.random(), Math.random(), Math.random()),
+        },
+      },
+    })
+    const mesh = new Mesh(this.geometry, material)
+    mesh.frustumCulled = false
+    mesh.visible = false
+    this.scene.add(mesh)
+
+    this.planes.set(meta.id, {
+      meta,
+      kind: meta.kind,
+      mesh,
+      material,
+      loaded: false,
+      requested: false,
+      hoverTarget: 0,
+      hoverFrom: 0,
+      hoverT: 1,
+      opacityTarget: 0,
+      docTop: 0,
+      left: 0,
+      width: 0,
+      height: 0,
+      videoDist: 0,
+    })
+  }
+
+  /** DOM pointerenter/leave for non-GLB planes (GLBs never get the dim/smoke tween). */
+  setHover(id: number, hovered: boolean) {
+    const p = this.planes.get(id)
+    if (!p || p.kind === "glb") return
+    this.startHover(p, hovered ? 1 : 0)
+  }
+
   measureLayout() {
     const scrollY = window.scrollY
-    for (const p of this.planes) {
-      const r = p.el.getBoundingClientRect()
+    for (const p of this.planes.values()) {
+      const r = p.meta.el.getBoundingClientRect()
       p.docTop = r.top + scrollY
       p.left = r.left
       p.width = r.width
@@ -273,7 +257,7 @@ export class Gallery {
 
   private load(plane: MediaPlane) {
     plane.requested = true
-    const src = plane.el.getAttribute("data-media")!
+    const src = plane.meta.src
     if (plane.kind === "video") this.loadVideo(plane, src)
     else if (plane.kind === "glb") this.loadGlb(plane, src)
     else this.loadImage(plane, src)
@@ -394,7 +378,7 @@ export class Gallery {
     candidates.length = 0
     const r = this.rect
 
-    for (const p of this.planes) {
+    for (const p of this.planes.values()) {
       if (p.width === 0) continue
 
       r.top = p.docTop - scrollY
@@ -527,5 +511,28 @@ export class Gallery {
     this.camera.updateProjectionMatrix()
     this.uShrinkPx.value = h * 0.003
     this.measureLayout()
+  }
+
+  private disposePlane(p: MediaPlane) {
+    this.scene.remove(p.mesh)
+    p.material.dispose()
+    if (p.video) {
+      p.video.pause()
+      p.video.removeAttribute("src")
+      p.video.load()
+    }
+    p.videoTex?.dispose()
+    if (p.glb) p.glb.rt.dispose()
+  }
+
+  dispose() {
+    window.removeEventListener("resize", this.onResize)
+    window.removeEventListener("pointermove", this.onPointerMove)
+    this.layoutObserver?.disconnect()
+    for (const p of this.planes.values()) this.disposePlane(p)
+    this.planes.clear()
+    this.geometry.dispose()
+    this.envMap.dispose()
+    this.ktx2.dispose()
   }
 }

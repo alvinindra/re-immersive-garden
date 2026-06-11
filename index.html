@@ -15,41 +15,9 @@
     <link rel="preload" href="/plaster.jpg" as="image" />
   </head>
   <body>
-    <!-- fixed full-screen WebGL: relief background + scrolling media gallery (2nd pass) -->
-    <canvas id="webgl"></canvas>
+    <!-- React renders everything: fixed WebGL canvas, topbar, scroll content, cursors -->
+    <div id="root"></div>
 
-    <header class="topbar">
-      <a class="topbar__about" href="/learn/">Learn</a>
-      <a class="topbar__about" href="https://immersive-g.com/the-studio" target="_blank" rel="noopener">About</a>
-      <span class="topbar__monogram" aria-hidden="true">IG</span>
-    </header>
-
-    <!-- everything inside scrolls under Lenis -->
-    <div id="scroll-content">
-      <section class="hero">
-        <a class="hero__logo" href="/" aria-label="Immersive Garden">
-          <span class="hero__monogram">IG</span>
-          <span class="hero__wordmark">Immersive<br />Garden</span>
-        </a>
-        <p class="hero__tagline">Innovative digital experiences studio</p>
-        <div class="hero__scroll">Scroll down</div>
-      </section>
-
-      <!-- project + media blocks injected here -->
-      <main id="blocks"></main>
-
-      <!-- black footer injected after #blocks -->
-    </div>
-
-    <!-- bottom-left "See all projects" button -->
-    <a class="allProjects" href="https://immersive-g.com/projects/" target="_blank" rel="noopener">
-      <span class="allProjects__text">See all projects</span>
-      <span class="allProjects__arrow" aria-hidden="true">&#8595;</span>
-    </a>
-
-    <!-- cursor hover label (the dot cluster is the HomeScrollCursor) -->
-    <span class="cursor__label" aria-hidden="true"></span>
-
-    <script type="module" src="/src/main.ts"></script>
+    <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
