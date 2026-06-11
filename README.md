@@ -4,10 +4,16 @@ A faithful rebuild of the [immersive-g.com](https://immersive-g.com/) homepage: 
 **bas-relief + mouse-trail** hero, plus the full **smooth-scrolling project gallery**
 with per-project hover, the scroll-cursor dots, and the fade-to-black footer relief.
 
+React 19 + TypeScript + [react-three-fiber](https://github.com/pmndrs/react-three-fiber):
+React owns the DOM (grid, captions, cursors) and the `<Canvas>`; the imperative
+relief/fluid/footer pipeline runs inside a single priority-1 `useFrame` that owns
+the frameloop. Scroll, pointer, and hover state flow through transient zustand
+stores — nothing re-renders React during scroll.
+
 ```bash
-npm install
-npm run dev      # http://localhost:5173
-npm run build
+bun install
+bun run dev      # http://localhost:5173
+bun run build
 ```
 
 Move the mouse over the page: the flat white plaster reveals a sculpted garden
@@ -25,11 +31,12 @@ The real homepage is a Lenis virtual scroll over a 13-column grid; each project
 media is a `<img data-src…>` slot that the WebGL layer reads via `getBoundingClientRect`
 and draws as a textured plane. This rebuild mirrors that pipeline:
 
-- **Smooth scroll** (`src/scroll/SmoothScroll.ts`) — [Lenis](https://github.com/darkroomengineering/lenis)
-  with the site's own config (`lerp 0.05`, exponential easing). Emits the real
-  `scrollSmooth` payload `{scrollY, speed, scrollPct}` each frame.
-- **Media gallery** (`src/home/Gallery.ts`, `shaders/gallery.*.glsl`) — an
-  orthographic pixel-space camera; one plane per `[data-media]` slot, synced to its
+- **Smooth scroll** (`src/scroll/scrollStore.ts`, `<ReactLenis root>` in `src/App.tsx`) —
+  [Lenis](https://github.com/darkroomengineering/lenis) with the site's own config
+  (`lerp 0.05`, exponential easing), driven from the WebGL frameloop. Emits the real
+  `scrollSmooth` payload `{scrollY, speed, scrollPct}` each tick.
+- **Media gallery** (`src/gallery/GalleryCoordinator.ts`, `shaders/gallery.*.glsl`) — an
+  orthographic pixel-space camera; one plane per `<MediaBlock>` slot, synced to its
   DOM rect, cover-fit UV, a quadratic **scroll-velocity bend**, and a hover scale-inset
   + dim + dark border. Drawn as a depth-cleared second pass in the relief's renderer.
   Each slot renders its real media type, like the live site:
@@ -41,16 +48,16 @@ and draws as a textured plane. This rebuild mirrors that pipeline:
       (`aspect×1024`) each frame via the GLB's own camera, tilting with scroll
       (`rotation.x = scrollNorm × 0.45`) plus a slow idle spin — they float on the
       relief exactly like the original.
-- **Hover cursor** (`src/cursor.ts`) — the dot gains a "View project" label over a
-  media slot, matching the site's `setCursor`.
-- **Scroll cursor** (`src/home/ScrollCursor.ts`) — 3 dots riding the pointer, plus a
-  120-dot streak in fast mode (`{number:120, space:2, speed:50}`, lifted from the bundle).
-- **Relief on scroll** (`src/relief/Relief.ts`) — the persistent relief panel pans
+- **Hover cursor** (`src/components/CursorLabel.tsx`) — the dot gains a "View project"
+  label over a media slot, matching the site's `setCursor`.
+- **Scroll cursor** (`src/components/ScrollCursorDots.tsx`) — 3 dots riding the pointer,
+  plus a 120-dot streak in fast mode (`{number:120, space:2, speed:50}`, lifted from the bundle).
+- **Relief on scroll** (`src/webgl/scenes/HomeScene.ts`) — the persistent relief panel pans
   vertically with `scrollPct`, so the sculpted creatures change as you scroll (not a
   fixed bird); the chromatic fluid trail reacts to the cursor across every section.
-- **Text blocks** (`src/home/dom.ts`) — "Our approach" / "Our mission" reveal their
-  words (fade up, staggered) on scroll into view, like the real AnimatedParagraph.
-- **Footer** (`src/home/dom.ts`, `Relief.loadFooter`) — at the bottom the home relief
+- **Text blocks** (`src/components/Blocks.tsx`) — "Our approach" / "Our mission" reveal
+  their words (fade up, staggered) on scroll into view, like the real AnimatedParagraph.
+- **Footer** (`src/components/HomeFooter.tsx`, `WebGLApp.loadFooter`) — at the bottom the home relief
   cross-fades to the dark **`footer_compressed.glb`** garden (its own model, same fluid
   trail), under the centred email + address + links.
 
@@ -116,18 +123,27 @@ public/
   draco/                                    # local draco decoder
   fonts/                                    # PSTimes + Helvetica Neue (real site fonts)
 src/
-  main.ts                 # wires scroll → relief (+ gallery overlay) → scroll cursor
+  main.tsx                # React root (no StrictMode — GPU pipeline owns listeners)
+  App.tsx                 # <ReactLenis root> + ScrollBridge + canvas + DOM layout
+  components/             # Topbar, Hero, Blocks (grid + text reveal), HomeFooter,
+                          #   AllProjects, CursorLabel, ScrollCursorDots
   scroll/
-    SmoothScroll.ts       # Lenis wrapper, emits scrollSmooth {scrollY, speed, scrollPct}
+    scrollStore.ts        # zustand: Lenis instance + scrollSmooth state + listeners
+  cursor/
+    cursorStore.ts        # zustand: pointer label text/light
   home/
     manifest.ts           # 18-project content + 13-col grid layout (from __NUXT__)
-    dom.ts                # builds the scrollable grid + footer DOM
-    Gallery.ts            # WebGL media planes synced to DOM rects
-    ScrollCursor.ts       # 3-dot pointer cluster + 120-dot fast-mode streak
     shaders/gallery.*.glsl
-  relief/
-    Relief.ts             # scene, camera framing, GLB load, pointer + idle sweep,
+  gallery/
+    registry.ts           # <MediaBlock> → WebGL handoff (element + metadata)
+    GalleryOverlay.tsx    # bridges registry → coordinator inside the canvas
+    GalleryCoordinator.ts # WebGL media planes synced to DOM rects
+  webgl/
+    WebGLCanvas.tsx       # R3F <Canvas flat> + WebGL fallback / context-lost
+    Experience.tsx        # priority-1 useFrame: lenis tick → pipeline update
+    WebGLApp.ts           # scene wiring, camera framing, pointer + idle sweep,
                           #   gallery overlay pass, grey→dark footer fade
-    Flowmap.ts            # ping-pong velocity flowmap
-    shaders/*.glsl
+    core/Flowmap.ts       # ping-pong velocity flowmap
+    core/FluidSimulation.ts
+    scenes/ shaders/
 ```
